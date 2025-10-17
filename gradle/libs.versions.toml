@@ -1,0 +1,50 @@
+# gradle/libs.versions.toml
+
+[versions]
+androidGradlePlugin = "8.2.0"
+kotlin = "1.9.0"
+coreKtx = "1.12.0"
+lifecycleRuntimeKtx = "2.6.2"
+activityCompose = "1.8.1"
+composeBom = "2023.08.00"
+appcompat = "1.6.1"
+moshi = "1.15.0"
+wire = "4.9.3" # 建议使用较新的版本
+junit = "4.13.2"
+junitVersion = "1.1.5"
+espressoCore = "3.5.1"
+# ... 其他版本
+constraintlayout = "2.1.4" # <-- 添加这一行
+
+[libraries]
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" } # 添加这一行
+
+
+# Moshi 和 Wire 的依赖
+moshi = { group = "com.squareup.moshi", name = "moshi", version.ref = "moshi" }
+wire-runtime = { group = "com.squareup.wire", name = "wire-runtime", version.ref = "wire" }
+wire-moshi-adapter = { group = "com.squareup.wire", name = "wire-moshi-adapter", version.ref = "wire" }
+
+# 测试依赖
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
+androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+
+[plugins]
+androidApplication = { id = "com.android.application", version.ref = "androidGradlePlugin" }
+# 下面这一行是关键，请确保它存在且完全正确
+androidLibrary = { id = "com.android.library", version.ref = "androidGradlePlugin" }
+jetbrainsKotlinAndroid = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+wire = { id = "com.squareup.wire", version.ref = "wire" }
