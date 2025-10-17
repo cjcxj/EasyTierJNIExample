@@ -21,15 +21,11 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.lifecycleScope
+import com.easytier.jni.EasyTierJNI
 import com.easytier.jni.EasyTierManager
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -109,9 +105,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Generates a TOML configuration string from the ConfigData state.
-     */
     private fun generateTomlConfig(data: ConfigData): String {
         val listenersFormatted = data.listeners.lines()
             .filter { it.isNotBlank() }
@@ -124,7 +117,7 @@ class MainActivity : ComponentActivity() {
         return """
             hostname = "${data.hostname}"
             instance_name = "${data.instanceName}"
-            instance_id = "53dccdcf-9f9b-4062-a62c-8ec97f3bac0e" # Keep a fixed instance_id or generate one
+            instance_id = "53dccdcf-9f9b-4062-a62c-8ec97f3bac0e"
             ipv4 = "${data.ipv4}"
             dhcp = ${data.dhcp}
             listeners = [
@@ -146,47 +139,26 @@ class MainActivity : ComponentActivity() {
         """.trimIndent()
     }
 
-
     private fun startEasyTier() {
         if (isRunningState.value) {
             Log.w(TAG, "EasyTier 已在运行中。")
             return
         }
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val config = generateTomlConfig(configDataState.value)
-                Log.d(TAG, "Generated Config:\n$config")
+        val config = generateTomlConfig(configDataState.value)
+        Log.d(TAG, "生成的配置:\n$config")
 
-                withContext(Dispatchers.Main) {
-                    easyTierManager = EasyTierManager(
-                        activity = this@MainActivity,
-                        instanceName = configDataState.value.instanceName,
-                        networkConfig = config
-                    )
-                    easyTierManager?.start()
-                    statusState.value = easyTierManager?.getStatus()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "启动 EasyTier 失败", e)
-                withContext(Dispatchers.Main) {
-                    statusState.value = EasyTierManager.EasyTierStatus(false, "错误", e.message, emptyList())
-                    Toast.makeText(this@MainActivity, "启动失败: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
+        easyTierManager = EasyTierManager(
+            activity = this,
+            instanceName = configDataState.value.instanceName,
+            networkConfig = config
+        )
+        easyTierManager?.start()
     }
 
     private fun stopEasyTier() {
-        if (!isRunningState.value) return
-        Log.i(TAG, "正在停止 EasyTier...")
-        try {
-            easyTierManager?.stop()
-        } catch (e: Exception) {
-            Log.e(TAG, "停止 EasyTier 时出错", e)
-        } finally {
-            easyTierManager = null
-            statusState.value = null
-        }
+        easyTierManager?.stop()
+        easyTierManager = null
+        statusState.value = EasyTierManager.EasyTierStatus(false, configDataState.value.instanceName, null, emptyList())
     }
 
     // --- Composable UI ---
@@ -200,13 +172,10 @@ class MainActivity : ComponentActivity() {
         isRunning: Boolean,
         onControlButtonClick: () -> Unit
     ) {
-        // Coroutine to periodically update status when running
-        LaunchedEffect(isRunning) {
-            if (isRunning) {
-                while (true) {
-                    statusState.value = easyTierManager?.getStatus()
-                    delay(2000L)
-                }
+        LaunchedEffect(Unit) {
+            while (true) {
+                statusState.value = easyTierManager?.getStatus()
+                delay(1000L)
             }
         }
 
@@ -231,7 +200,6 @@ class MainActivity : ComponentActivity() {
             ) {
                 Spacer(Modifier.height(16.dp))
 
-                // --- Control Button ---
                 Button(
                     onClick = onControlButtonClick,
                     modifier = Modifier.fillMaxWidth(),
@@ -243,79 +211,32 @@ class MainActivity : ComponentActivity() {
                 }
                 Spacer(Modifier.height(16.dp))
 
-                // --- Status Card ---
                 StatusCard(status = status, isRunning = isRunning)
                 Spacer(Modifier.height(16.dp))
 
-                // --- Config Sections ---
                 ConfigSection(title = "基本设置") {
-                    ConfigTextField(
-                        label = "主机名 (hostname)",
-                        value = configData.hostname,
-                        onValueChange = { onConfigChange(configData.copy(hostname = it)) },
-                        readOnly = isRunning
-                    )
-                    ConfigTextField(
-                        label = "实例名 (instance_name)",
-                        value = configData.instanceName,
-                        onValueChange = { onConfigChange(configData.copy(instanceName = it)) },
-                        readOnly = isRunning
-                    )
+                    ConfigTextField("主机名 (hostname)", configData.hostname, { onConfigChange(configData.copy(hostname = it)) }, isRunning)
+                    ConfigTextField("实例名 (instance_name)", configData.instanceName, { onConfigChange(configData.copy(instanceName = it)) }, isRunning)
                 }
 
                 ConfigSection(title = "网络身份") {
-                    ConfigTextField(
-                        label = "网络名 (network_name)",
-                        value = configData.networkName,
-                        onValueChange = { onConfigChange(configData.copy(networkName = it)) },
-                        readOnly = isRunning
-                    )
-                    ConfigTextField(
-                        label = "网络密钥 (network_secret)",
-                        value = configData.networkSecret,
-                        onValueChange = { onConfigChange(configData.copy(networkSecret = it)) },
-                        readOnly = isRunning
-                    )
+                    ConfigTextField("网络名 (network_name)", configData.networkName, { onConfigChange(configData.copy(networkName = it)) }, isRunning)
+                    ConfigTextField("网络密钥 (network_secret)", configData.networkSecret, { onConfigChange(configData.copy(networkSecret = it)) }, isRunning)
                 }
 
                 ConfigSection(title = "IP 设置") {
-                    ConfigTextField(
-                        label = "虚拟 IPv4 (ipv4)",
-                        value = configData.ipv4,
-                        onValueChange = { onConfigChange(configData.copy(ipv4 = it)) },
-                        readOnly = isRunning || configData.dhcp,
-                        placeholder = "例如 10.0.0.4/24"
-                    )
-                    ConfigSwitch(
-                        label = "自动分配IP (dhcp)",
-                        checked = configData.dhcp,
-                        onCheckedChange = { onConfigChange(configData.copy(dhcp = it)) },
-                        readOnly = isRunning
-                    )
+                    ConfigTextField("虚拟 IPv4 (ipv4)", configData.ipv4, { onConfigChange(configData.copy(ipv4 = it)) }, isRunning || configData.dhcp, placeholder = "例如: 10.0.0.4/24")
+                    ConfigSwitch("自动分配IP (dhcp)", configData.dhcp, { onConfigChange(configData.copy(dhcp = it)) }, isRunning)
                 }
 
                 ConfigSection(title = "连接设置") {
-                    ConfigTextField(
-                        label = "对等节点 (peers) - 每行一个",
-                        value = configData.peers,
-                        onValueChange = { onConfigChange(configData.copy(peers = it)) },
-                        readOnly = isRunning,
-                        singleLine = false,
-                        modifier = Modifier.height(100.dp)
-                    )
-                    ConfigTextField(
-                        label = "监听器 (listeners) - 每行一个",
-                        value = configData.listeners,
-                        onValueChange = { onConfigChange(configData.copy(listeners = it)) },
-                        readOnly = isRunning,
-                        singleLine = false,
-                        modifier = Modifier.height(120.dp)
-                    )
+                    ConfigTextField("对等节点 (每行一个)", configData.peers, { onConfigChange(configData.copy(peers = it)) }, isRunning, singleLine = false, modifier = Modifier.height(100.dp))
+                    ConfigTextField("监听器 (每行一个)", configData.listeners, { onConfigChange(configData.copy(listeners = it)) }, isRunning, singleLine = false, modifier = Modifier.height(120.dp))
                 }
 
-                ConfigSection(title = "功能标志 (flags)") {
-                    ConfigSwitch("延迟优先 (latency_first)", configData.latencyFirst, { onConfigChange(configData.copy(latencyFirst = it)) }, isRunning)
-                    ConfigSwitch("私有模式 (private_mode)", configData.privateMode, { onConfigChange(configData.copy(privateMode = it)) }, isRunning)
+                ConfigSection(title = "功能标志") {
+                    ConfigSwitch("延迟优先", configData.latencyFirst, { onConfigChange(configData.copy(latencyFirst = it)) }, isRunning)
+                    ConfigSwitch("私有模式", configData.privateMode, { onConfigChange(configData.copy(privateMode = it)) }, isRunning)
                     ConfigSwitch("启用 KCP 代理", configData.enableKcpProxy, { onConfigChange(configData.copy(enableKcpProxy = it)) }, isRunning)
                     ConfigSwitch("启用 QUIC 代理", configData.enableQuicProxy, { onConfigChange(configData.copy(enableQuicProxy = it)) }, isRunning)
                 }
@@ -335,12 +256,12 @@ class MainActivity : ComponentActivity() {
                 Text("状态信息", style = MaterialTheme.typography.titleLarge)
                 Divider(Modifier.padding(vertical = 8.dp))
                 StatusRow("服务状态:", if (isRunning) "运行中" else "已停止")
-                StatusRow("实例名称:", status?.instanceName ?: "N/A")
-                StatusRow("虚拟 IPv4:", status?.currentIpv4 ?: "N/A")
+                StatusRow("实例名称:", status?.instanceName ?: "暂无")
+                StatusRow("虚拟 IPv4:", status?.currentIpv4 ?: "暂无")
                 StatusRow(
                     "代理路由:",
-                    if (status?.currentProxyCidrs?.isEmpty() != false) "无"
-                    else status.currentProxyCidrs.joinToString("\n")
+                    if (status?.currentProxyCidrs.isNullOrEmpty()) "无"
+                    else status!!.currentProxyCidrs.joinToString("\n")
                 )
 
                 Spacer(Modifier.height(16.dp))
@@ -350,28 +271,28 @@ class MainActivity : ComponentActivity() {
                 Button(
                     onClick = {
                         try {
-                            val networkInfo = EasyTierManager.collectNetworkInfos(200)
-                            if (!networkInfo.isNullOrBlank()) {
-                                clipboardManager.setText(AnnotatedString(networkInfo))
-                                Toast.makeText(context, "网络信息已复制", Toast.LENGTH_SHORT).show()
+                            val networkInfoJson = EasyTierJNI.collectNetworkInfos(10)
+                            if (!networkInfoJson.isNullOrBlank()) {
+                                clipboardManager.setText(AnnotatedString(networkInfoJson))
+                                Toast.makeText(context, "网络信息 (JSON) 已复制", Toast.LENGTH_SHORT).show()
                             } else {
                                 Toast.makeText(context, "无网络信息可复制", Toast.LENGTH_SHORT).show()
                             }
                         } catch (e: Exception) {
-                            Log.e(TAG, "collectNetworkInfos failed", e)
+                            Log.e(TAG, "collectNetworkInfos 调用失败", e)
                             Toast.makeText(context, "获取信息失败: ${e.message}", Toast.LENGTH_LONG).show()
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = isRunning // Only enable when service is running
+                    enabled = isRunning
                 ) {
-                    Text("复制网络信息")
+                    Text("复制网络信息 (JSON)")
                 }
             }
         }
     }
 
-    // --- Helper Composables for UI building ---
+    // --- Helper Composables ---
 
     @Composable
     fun ConfigSection(title: String, content: @Composable ColumnScope.() -> Unit) {
@@ -385,70 +306,23 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun ConfigTextField(
-        label: String,
-        value: String,
-        onValueChange: (String) -> Unit,
-        readOnly: Boolean,
-        modifier: Modifier = Modifier,
-        singleLine: Boolean = true,
-        placeholder: String = ""
-    ) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = { Text(label) },
-            placeholder = { Text(placeholder) },
-            readOnly = readOnly,
-            modifier = modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            singleLine = singleLine,
-            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Next),
-        )
+    fun ConfigTextField(label: String, value: String, onValueChange: (String) -> Unit, readOnly: Boolean, modifier: Modifier = Modifier, singleLine: Boolean = true, placeholder: String = "") {
+        OutlinedTextField(value, onValueChange, label = { Text(label) }, placeholder = { Text(placeholder) }, readOnly = readOnly, modifier = modifier.fillMaxWidth().padding(vertical = 4.dp), singleLine = singleLine, keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Next))
     }
 
     @Composable
-    fun ConfigSwitch(
-        label: String,
-        checked: Boolean,
-        onCheckedChange: (Boolean) -> Unit,
-        readOnly: Boolean
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+    fun ConfigSwitch(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, readOnly: Boolean) {
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, modifier = Modifier.weight(1f))
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                enabled = !readOnly
-            )
+            Switch(checked, onCheckedChange, enabled = !readOnly)
         }
     }
 
     @Composable
     fun StatusRow(label: String, value: String) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(0.4f)
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(0.6f)
-            )
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.Top) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.4f))
+            Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.6f))
         }
     }
 }
