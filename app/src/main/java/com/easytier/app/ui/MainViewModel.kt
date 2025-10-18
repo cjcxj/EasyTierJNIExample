@@ -193,4 +193,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             private_mode = ${data.privateMode}
         """.trimIndent()
     }
+
+    /**
+     * 供UI层调用，以获取用于复制到剪贴板的原始JSON字符串。
+     * 这是一个 suspend 函数，以确保JNI调用在后台进行。
+     * @return 原始JSON字符串，如果失败则返回null。
+     */
+    suspend fun getRawJsonForClipboard(): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                EasyTierJNI.collectNetworkInfos(10)
+            } catch (e: Exception) {
+                Log.e(TAG, "getRawJsonForClipboard failed", e)
+                null
+            }
+        }
+    }
 }

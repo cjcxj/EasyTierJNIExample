@@ -45,9 +45,9 @@ fun PeerDetailScreen(peer: FinalPeerInfo, onBack: () -> Unit) {
                     Divider(Modifier.padding(vertical = 8.dp))
 
                     StatusRow("节点名称:", peer.hostname)
-                    StatusRow("虚拟 IP:", peer.virtualIp)
+                    StatusRow("虚拟 IP:", peer.virtualIp, isCopyable = true)
                     StatusRow("连接类型:", if (peer.isDirectConnection) "直连 (P2P)" else "中转 (Relay)")
-                    StatusRow(if (peer.isDirectConnection) "物理地址/端口:" else "下一跳节点:", peer.connectionDetails)
+                    StatusRow(if (peer.isDirectConnection) "物理地址/端口:" else "下一跳节点:", peer.connectionDetails, isCopyable = true)
                 }
             }
 

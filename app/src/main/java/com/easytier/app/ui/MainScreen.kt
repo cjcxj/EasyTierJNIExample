@@ -34,6 +34,7 @@ import com.easytier.app.ui.common.StatusRow
 import com.easytier.jni.DetailedNetworkInfo
 import com.easytier.jni.EasyTierManager
 import com.easytier.jni.FinalPeerInfo
+import kotlinx.coroutines.launch
 
 /**
  * - 可折叠配置项、详细信息卡片和导航逻辑。
@@ -50,6 +51,10 @@ fun MainScreen(
     detailedInfo: DetailedNetworkInfo?,
     onRefreshDetailedInfo: () -> Unit
 ) {
+    val viewModel: MainViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     Scaffold(
         topBar = {
             TopAppBar(
@@ -89,12 +94,32 @@ fun MainScreen(
 
             // -- 可折叠配置项 --
             ConfigSection(title = "基本设置", initiallyExpanded = true) {
-                ConfigTextField("主机名", configData.hostname, { onConfigChange(configData.copy(hostname = it)) }, enabled = !isRunning)
-                ConfigTextField("实例名", configData.instanceName, { onConfigChange(configData.copy(instanceName = it)) }, enabled = !isRunning)
+                ConfigTextField(
+                    "主机名",
+                    configData.hostname,
+                    { onConfigChange(configData.copy(hostname = it)) },
+                    enabled = !isRunning
+                )
+                ConfigTextField(
+                    "实例名",
+                    configData.instanceName,
+                    { onConfigChange(configData.copy(instanceName = it)) },
+                    enabled = !isRunning
+                )
             }
             ConfigSection(title = "网络身份") {
-                ConfigTextField("网络名", configData.networkName, { onConfigChange(configData.copy(networkName = it)) }, enabled = !isRunning)
-                ConfigTextField("网络密钥", configData.networkSecret, { onConfigChange(configData.copy(networkSecret = it)) }, enabled = !isRunning)
+                ConfigTextField(
+                    "网络名",
+                    configData.networkName,
+                    { onConfigChange(configData.copy(networkName = it)) },
+                    enabled = !isRunning
+                )
+                ConfigTextField(
+                    "网络密钥",
+                    configData.networkSecret,
+                    { onConfigChange(configData.copy(networkSecret = it)) },
+                    enabled = !isRunning
+                )
             }
             ConfigSection(title = "IP 设置") {
                 ConfigTextField(
@@ -116,14 +141,48 @@ fun MainScreen(
                 )
             }
             ConfigSection(title = "连接设置") {
-                ConfigTextField("对等节点 (每行一个)", configData.peers, { onConfigChange(configData.copy(peers = it)) }, enabled = !isRunning, singleLine = false, modifier = Modifier.height(100.dp))
-                ConfigTextField("监听器 (每行一个)", configData.listeners, { onConfigChange(configData.copy(listeners = it)) }, enabled = !isRunning, singleLine = false, modifier = Modifier.height(120.dp))
+                ConfigTextField(
+                    "对等节点 (每行一个)",
+                    configData.peers,
+                    { onConfigChange(configData.copy(peers = it)) },
+                    enabled = !isRunning,
+                    singleLine = false,
+                    modifier = Modifier.height(100.dp)
+                )
+                ConfigTextField(
+                    "监听器 (每行一个)",
+                    configData.listeners,
+                    { onConfigChange(configData.copy(listeners = it)) },
+                    enabled = !isRunning,
+                    singleLine = false,
+                    modifier = Modifier.height(120.dp)
+                )
             }
             ConfigSection(title = "功能标志") {
-                ConfigSwitch("延迟优先", configData.latencyFirst, { onConfigChange(configData.copy(latencyFirst = it)) }, enabled = !isRunning)
-                ConfigSwitch("私有模式", configData.privateMode, { onConfigChange(configData.copy(privateMode = it)) }, enabled = !isRunning)
-                ConfigSwitch("启用 KCP 代理", configData.enableKcpProxy, { onConfigChange(configData.copy(enableKcpProxy = it)) }, enabled = !isRunning)
-                ConfigSwitch("启用 QUIC 代理", configData.enableQuicProxy, { onConfigChange(configData.copy(enableQuicProxy = it)) }, enabled = !isRunning)
+                ConfigSwitch(
+                    "延迟优先",
+                    configData.latencyFirst,
+                    { onConfigChange(configData.copy(latencyFirst = it)) },
+                    enabled = !isRunning
+                )
+                ConfigSwitch(
+                    "私有模式",
+                    configData.privateMode,
+                    { onConfigChange(configData.copy(privateMode = it)) },
+                    enabled = !isRunning
+                )
+                ConfigSwitch(
+                    "启用 KCP 代理",
+                    configData.enableKcpProxy,
+                    { onConfigChange(configData.copy(enableKcpProxy = it)) },
+                    enabled = !isRunning
+                )
+                ConfigSwitch(
+                    "启用 QUIC 代理",
+                    configData.enableQuicProxy,
+                    { onConfigChange(configData.copy(enableQuicProxy = it)) },
+                    enabled = !isRunning
+                )
             }
 
             // -- 详细信息卡片 --
@@ -132,9 +191,22 @@ fun MainScreen(
                 onRefresh = onRefreshDetailedInfo,
                 onPeerClick = { peer ->
                     navController.navigate(Screen.PeerDetail.createRoute(peer.peerId))
+                },
+                isRunning = isRunning,
+                onCopyJsonClick = {
+                    scope.launch {
+                        val jsonString = viewModel.getRawJsonForClipboard()
+                        if (!jsonString.isNullOrBlank()) {
+                            clipboardManager.setText(AnnotatedString(jsonString))
+                            Toast.makeText(context, "网络信息 (JSON) 已复制", Toast.LENGTH_SHORT)
+                                .show()
+                        } else {
+                            // 这种情况可能是JNI调用失败
+                            Toast.makeText(context, "获取信息失败", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             )
-
             Spacer(Modifier.height(32.dp))
         }
     }
@@ -145,7 +217,10 @@ fun MainScreen(
 
 @Composable
 fun StatusCard(status: EasyTierManager.EasyTierStatus?, isRunning: Boolean) {
-    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
         Column(Modifier.padding(16.dp)) {
             Text("状态信息", style = MaterialTheme.typography.titleMedium)
             Divider(Modifier.padding(vertical = 8.dp))
@@ -157,22 +232,39 @@ fun StatusCard(status: EasyTierManager.EasyTierStatus?, isRunning: Boolean) {
 }
 
 @Composable
-fun ConfigSection(title: String, initiallyExpanded: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+fun ConfigSection(
+    title: String,
+    initiallyExpanded: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit
+) {
     var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+    Card(modifier = Modifier
+        .fillMaxWidth()
+        .padding(vertical = 4.dp)) {
         Column {
             Row(
-                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
                 Icon(
                     imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
                     contentDescription = if (expanded) "折叠" else "展开",
                 )
             }
             AnimatedVisibility(visible = expanded) {
-                Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp).fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                        .fillMaxWidth()
+                ) {
                     content()
                 }
             }
@@ -181,30 +273,59 @@ fun ConfigSection(title: String, initiallyExpanded: Boolean = false, content: @C
 }
 
 @Composable
-fun ConfigTextField(label: String, value: String, onValueChange: (String) -> Unit, enabled: Boolean, singleLine: Boolean = true, placeholder: String = "", modifier: Modifier = Modifier) {
+fun ConfigTextField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    enabled: Boolean,
+    singleLine: Boolean = true,
+    placeholder: String = "",
+    modifier: Modifier = Modifier
+) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
         placeholder = { Text(placeholder) },
         enabled = enabled,
-        modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
         singleLine = singleLine,
         keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Next)
     )
 }
 
 @Composable
-fun ConfigSwitch(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+fun ConfigSwitch(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Text(label, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 
 @Composable
-fun DetailedInfoCard(info: DetailedNetworkInfo?, onRefresh: () -> Unit, onPeerClick: (FinalPeerInfo) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
+fun DetailedInfoCard(
+    info: DetailedNetworkInfo?,
+    onRefresh: () -> Unit,
+    onPeerClick: (FinalPeerInfo) -> Unit,
+    isRunning: Boolean,
+    onCopyJsonClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
         Column(Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -219,7 +340,12 @@ fun DetailedInfoCard(info: DetailedNetworkInfo?, onRefresh: () -> Unit, onPeerCl
             Divider(Modifier.padding(vertical = 8.dp))
 
             if (info == null) {
-                Text("服务运行时将自动显示详细信息。", modifier = Modifier.align(Alignment.CenterHorizontally).padding(16.dp))
+                Text(
+                    "服务运行时将自动显示详细信息。",
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(16.dp)
+                )
             } else {
                 InfoSection(title = "本机信息") {
                     StatusRow("主机名:", info.myNode.hostname)
@@ -230,11 +356,26 @@ fun DetailedInfoCard(info: DetailedNetworkInfo?, onRefresh: () -> Unit, onPeerCl
                     StatusRow("公网 IP:", info.myNode.publicIp, isCopyable = true)
                     StatusRow("NAT 类型:", info.myNode.natType)
                 }
-                InfoSection(title = "监听器") { Text(info.myNode.listeners.joinToString("\n"), style = MaterialTheme.typography.bodySmall, lineHeight = 16.sp) }
-                InfoSection(title = "接口IP地址") { Text(info.myNode.interfaceIps.joinToString("\n"), style = MaterialTheme.typography.bodySmall, lineHeight = 16.sp) }
+                InfoSection(title = "监听器") {
+                    Text(
+                        info.myNode.listeners.joinToString("\n"),
+                        style = MaterialTheme.typography.bodySmall,
+                        lineHeight = 16.sp
+                    )
+                }
+                InfoSection(title = "接口IP地址") {
+                    Text(
+                        info.myNode.interfaceIps.joinToString("\n"),
+                        style = MaterialTheme.typography.bodySmall,
+                        lineHeight = 16.sp
+                    )
+                }
 
                 Spacer(Modifier.height(16.dp))
-                Text("对等节点 (${info.finalPeerList.size})", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "对等节点 (${info.finalPeerList.size})",
+                    style = MaterialTheme.typography.titleMedium
+                )
                 Spacer(Modifier.height(8.dp))
                 Column(modifier = Modifier.heightIn(max = 400.dp)) {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -247,13 +388,36 @@ fun DetailedInfoCard(info: DetailedNetworkInfo?, onRefresh: () -> Unit, onPeerCl
                 Spacer(Modifier.height(16.dp))
                 Text("事件日志", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
-                Column(modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(8.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 200.dp)
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(8.dp)
+                ) {
                     LazyColumn {
                         items(info.events) { event ->
-                            Text(text = "[${event.time}] ${event.message}", fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 10.sp, lineHeight = 12.sp)
+                            Text(
+                                text = "[${event.time}] ${event.message}",
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontSize = 10.sp,
+                                lineHeight = 12.sp
+                            )
                         }
                     }
                 }
+            }
+
+            // 【复制JSON按钮】
+            Button(
+                onClick = onCopyJsonClick,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = isRunning
+            ) {
+                Text("复制网络信息 (JSON)")
             }
         }
     }
@@ -262,7 +426,11 @@ fun DetailedInfoCard(info: DetailedNetworkInfo?, onRefresh: () -> Unit, onPeerCl
 @Composable
 fun InfoSection(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier = Modifier.padding(bottom = 12.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
         content()
     }
 }
@@ -270,7 +438,9 @@ fun InfoSection(title: String, content: @Composable ColumnScope.() -> Unit) {
 @Composable
 fun FinalPeerInfoItem(peer: FinalPeerInfo, onClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
@@ -280,19 +450,31 @@ fun FinalPeerInfoItem(peer: FinalPeerInfo, onClick: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(peer.hostname, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(
+                    peer.hostname,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
                 if (!peer.isDirectConnection) {
                     Text(
                         text = "中转",
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                         style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)
+                        modifier = Modifier
+                            .background(
+                                MaterialTheme.colorScheme.secondaryContainer,
+                                RoundedCornerShape(4.dp)
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
             }
             Divider(Modifier.padding(vertical = 4.dp))
             StatusRow("虚拟 IP:", peer.virtualIp)
-            StatusRow(if (peer.isDirectConnection) "物理地址:" else "下一跳:", peer.connectionDetails)
+            StatusRow(
+                if (peer.isDirectConnection) "物理地址:" else "下一跳:",
+                peer.connectionDetails
+            )
             StatusRow("延迟:", peer.latency)
             StatusRow("流量 (收/发):", peer.traffic)
         }
