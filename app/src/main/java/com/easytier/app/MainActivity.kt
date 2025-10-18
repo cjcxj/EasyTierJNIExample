@@ -35,9 +35,26 @@ import com.easytier.jni.EasyTierManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.json.JSONObject
-import kotlin.math.log10
-import kotlin.math.pow
+import com.easytier.jni.NetworkInfoParser
+import com.easytier.jni.DetailedNetworkInfo
+import com.easytier.jni.FinalPeerInfo
+
+// --- Data class for UI state ---
+data class ConfigData(
+    val hostname: String = "Android-Device",
+    val instanceName: String = "easytier",
+    val ipv4: String = "",
+    val dhcp: Boolean = true,
+    val listeners: String = "tcp://0.0.0.0:11010\nudp://0.0.0.0:11010\nwg://0.0.0.0:11011",
+    val rpcPortal: String = "0.0.0.0:0",
+    val networkName: String = "easytier",
+    val networkSecret: String = "",
+    val peers: String = "tcp://public.easytier.top:11010",
+    val enableKcpProxy: Boolean = false,
+    val enableQuicProxy: Boolean = false,
+    val latencyFirst: Boolean = false,
+    val privateMode: Boolean = false
+)
 
 class MainActivity : ComponentActivity() {
 
@@ -46,23 +63,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private var easyTierManager: EasyTierManager? = null
-
-    // --- Data class for UI state ---
-    data class ConfigData(
-        val hostname: String = "Android-Device",
-        val instanceName: String = "cjcxj-easytier",
-        val ipv4: String = "10.0.0.4/24",
-        val dhcp: Boolean = false,
-        val listeners: String = "tcp://0.0.0.0:11010\nudp://0.0.0.0:11010\nwg://0.0.0.0:11011",
-        val rpcPortal: String = "0.0.0.0:0",
-        val networkName: String = "cjcxj-easytier",
-        val networkSecret: String = "dc230d4b-6702-4a65-87b4-26a06f3684b5",
-        val peers: String = "tcp://175.178.155.56:11010",
-        val enableKcpProxy: Boolean = true,
-        val enableQuicProxy: Boolean = true,
-        val latencyFirst: Boolean = true,
-        val privateMode: Boolean = true
-    )
+    private lateinit var settingsRepository: SettingsRepository
 
     // --- UI State ---
     private val configDataState = mutableStateOf(ConfigData())
@@ -83,11 +84,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        settingsRepository = SettingsRepository(applicationContext)
+
+        // 在 Coroutine 中加载配置
+        lifecycleScope.launch {
+            configDataState.value = settingsRepository.loadConfig()
+        }
+
         setContent {
             MaterialTheme {
                 MainScreen(
                     configData = configDataState.value,
-                    onConfigChange = { newConfig -> configDataState.value = newConfig },
+                    onConfigChange = { newConfig ->
+                        configDataState.value = newConfig
+                        // 每当配置更改时，自动保存
+                        lifecycleScope.launch {
+                            settingsRepository.saveConfig(newConfig)
+                        }
+                    },
                     status = statusState.value,
                     isRunning = isRunningState.value,
                     onControlButtonClick = {
@@ -127,11 +142,16 @@ class MainActivity : ComponentActivity() {
             .filter { it.isNotBlank() }
             .joinToString(separator = "\n") { "[[peer]]\nuri = \"$it\"" }
 
+        val ipv4ConfigLine = if (data.ipv4.isNotBlank() && !data.dhcp) {
+            "ipv4 = \"${data.ipv4}\""
+        } else {
+            "" // 如果 ipv4 为空或 dhcp 启用，则不生成此行
+        }
+
         return """
             hostname = "${data.hostname}"
             instance_name = "${data.instanceName}"
-            instance_id = "53dccdcf-9f9b-4062-a62c-8ec97f3bac0e"
-            ipv4 = "${data.ipv4}"
+            $ipv4ConfigLine
             dhcp = ${data.dhcp}
             listeners = [
                 $listenersFormatted
@@ -180,37 +200,24 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun refreshDetailedInfo(showToast: Boolean = false) {
-        // 如果服务未运行，则清除旧信息并返回
         if (easyTierManager == null || !isRunningState.value) {
             detailedInfoState.value = null
-            if (showToast) {
-                Toast.makeText(this, "服务未运行，无法刷新", Toast.LENGTH_SHORT).show()
-            }
+            if (showToast) Toast.makeText(this, "服务未运行，无法刷新", Toast.LENGTH_SHORT).show()
             return
         }
-
+        
         val jsonString = EasyTierJNI.collectNetworkInfos(10)
         if (jsonString != null) {
             try {
                 val instanceName = configDataState.value.instanceName
-                detailedInfoState.value = parseJsonToDetailedInfo(jsonString, instanceName)
-                if (showToast) {
-                    Toast.makeText(this@MainActivity, "详细信息已刷新", Toast.LENGTH_SHORT).show()
-                }
+                detailedInfoState.value = NetworkInfoParser.parse(jsonString, instanceName)
+                if (showToast) Toast.makeText(this@MainActivity, "详细信息已刷新", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Log.e(TAG, "解析详细网络信息失败", e)
-                if (showToast) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "解析信息失败: ${e.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
+                if (showToast) Toast.makeText(this@MainActivity, "解析信息失败: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         } else {
-            if (showToast) {
-                Toast.makeText(this@MainActivity, "获取网络信息失败", Toast.LENGTH_SHORT).show()
-            }
+            if (showToast) Toast.makeText(this@MainActivity, "获取网络信息失败", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -315,12 +322,21 @@ class MainActivity : ComponentActivity() {
                         configData.ipv4,
                         { onConfigChange(configData.copy(ipv4 = it)) },
                         isRunning || configData.dhcp,
-                        placeholder = "例如: 10.0.0.4/24"
+                        placeholder = if (configData.dhcp) "由DHCP自动分配" else "例如: 10.0.0.1/24"
                     )
                     ConfigSwitch(
                         "自动分配IP (dhcp)",
                         configData.dhcp,
-                        { onConfigChange(configData.copy(dhcp = it)) },
+                        // 当用户点击开关时，执行更复杂的逻辑
+                        { dhcpEnabled ->
+                            if (dhcpEnabled) {
+                                // 如果启用DHCP，清空ipv4字段
+                                onConfigChange(configData.copy(dhcp = true, ipv4 = ""))
+                            } else {
+                                // 如果禁用DHCP，可以恢复一个默认值，或者保持为空让用户输入
+                                onConfigChange(configData.copy(dhcp = false, ipv4 = "10.0.0.1/24"))
+                            }
+                        },
                         isRunning
                     )
                 }
@@ -703,274 +719,4 @@ class MainActivity : ComponentActivity() {
             )
         }
     }
-}
-
-
-// 顶层数据容器
-data class DetailedNetworkInfo(
-    val myNode: MyNodeInfo,
-    val events: List<EventInfo>,
-    val finalPeerList: List<FinalPeerInfo> // 最终组合后的对等节点列表
-)
-
-// 本机信息
-data class MyNodeInfo(
-    val hostname: String,
-    val version: String,
-    val virtualIp: String,
-    val publicIp: String,
-    val natType: String,
-    val listeners: List<String>,
-    val interfaceIps: List<String>
-)
-
-// 事件信息
-data class EventInfo(
-    val time: String,
-    val message: String
-)
-
-// 路由信息 (从 "routes" 解析)
-data class RouteData(
-    val peerId: Long,
-    val hostname: String,
-    val virtualIp: String,
-    val nextHopPeerId: Long,
-    val pathLatency: Int,
-    val cost: Int
-)
-
-// 直连信息 (从 "peers" 解析)
-data class PeerConnectionData(
-    val peerId: Long,
-    val physicalAddr: String,
-    val latencyUs: Long,
-    val rxBytes: Long,
-    val txBytes: Long
-)
-
-// 最终展示给UI的、组合后的对等节点信息
-data class FinalPeerInfo(
-    val hostname: String,
-    val virtualIp: String,
-    val isDirectConnection: Boolean,
-    val connectionDetails: String, // 用于显示物理地址或下一跳
-    val latency: String,
-    val traffic: String // 用于显示流量或 N/A
-)
-
-/**
- * 将整数形式的IP地址转换为点分十进制字符串。
- */
-fun parseIntegerToIp(addr: Int): String {
-    return String.format(
-        "%d.%d.%d.%d",
-        (addr ushr 24) and 0xFF,
-        (addr ushr 16) and 0xFF,
-        (addr ushr 8) and 0xFF,
-        addr and 0xFF
-    )
-}
-
-/**
- * 格式化字节大小为可读的 KB, MB, GB。
- */
-fun formatBytes(bytes: Long): String {
-    if (bytes < 1024) return "$bytes B"
-    val exp = (log10(bytes.toDouble()) / log10(1024.0)).toInt()
-    val pre = "KMGTPE"[exp - 1]
-    return String.format("%.1f %sB", bytes / 1024.0.pow(exp.toDouble()), pre)
-}
-
-/**
- * 解析 UDP NAT 类型代码为可读的字符串。
- */
-fun parseNatType(typeCode: Int): String {
-    return when (typeCode) {
-        // NatType.Unknown
-        0 -> "Unknown (未知类型)"
-        // NatType.OpenInternet
-        1 -> "Open Internet (开放互联网)" // P2P 最佳
-        // NatType.NoPAT
-        2 -> "No PAT (无端口转换)"
-        // NatType.FullCone
-        3 -> "Full Cone (完全锥形)" // P2P 很好
-        // NatType.Restricted
-        4 -> "Restricted Cone (限制锥形)" // P2P 较好
-        // NatType.PortRestricted
-        5 -> "Port Restricted (端口限制锥形)" // P2P 一般
-        // NatType.Symmetric
-        6 -> "Symmetric (对称型)" // P2P 困难
-        // NatType.SymUdpFirewall
-        7 -> "Symmetric UDP Firewall (对称UDP防火墙)"
-        // NatType.SymmetricEasyInc
-        8 -> "Symmetric Easy Inc (对称型-端口递增)"
-        // NatType.SymmetricEasyDec
-        9 -> "Symmetric Easy Dec (对称型-端口递减)"
-        // 其他未知代码
-        else -> "Other Type ($typeCode)"
-    }
-}
-
-/**
- * 将给定的 JSON 字符串解析为详细的网络信息结构。
- *
- * 首先解析 JSON 数据中的指定实例部分，然后分别提取 my_node_info、events、routes 和 peers 信息，
- * 最后根据路由表和直连信息组装出完整的对等节点列表，并返回包含所有信息的 [DetailedNetworkInfo] 对象。
- *
- * @param jsonString 包含网络信息的完整 JSON 字符串
- * @param instanceName 要解析的具体实例名称，用于从 JSON 的 "map" 中获取对应数据
- * @return 包含当前节点信息、事件列表和最终对等节点列表的 [DetailedNetworkInfo] 实例
- */
-fun parseJsonToDetailedInfo(jsonString: String, instanceName: String): DetailedNetworkInfo {
-    val root = JSONObject(jsonString)
-    val instance = root.getJSONObject("map").getJSONObject(instanceName)
-
-    // --- 独立解析各个部分 ---
-    val myNode = parseMyNodeInfo(instance.getJSONObject("my_node_info"))
-    val events = parseEvents(instance.getJSONArray("events"))
-    val routesMap = parseRoutes(instance.getJSONArray("routes"))
-    val peersMap = parsePeers(instance.getJSONArray("peers"))
-
-    // --- 组装最终的对等节点列表 ---
-    val finalPeerList = mutableListOf<FinalPeerInfo>()
-    // 以路由表为准，遍历所有已知的节点
-    routesMap.values.forEach { route ->
-        val peerConn = peersMap[route.peerId] // 尝试查找该节点的直连信息
-
-        if (peerConn != null) {
-            // --- 情况A: 找到了直连信息 ---
-            finalPeerList.add(
-                FinalPeerInfo(
-                    hostname = route.hostname,
-                    virtualIp = route.virtualIp,
-                    isDirectConnection = true,
-                    connectionDetails = peerConn.physicalAddr,
-                    latency = "${peerConn.latencyUs / 1000} ms",
-                    traffic = "${formatBytes(peerConn.rxBytes)} / ${formatBytes(peerConn.txBytes)}"
-                )
-            )
-        } else {
-            // --- 情况B: 未找到直连信息，说明是中转 ---
-            val nextHopHostname = routesMap[route.nextHopPeerId]?.hostname ?: "未知"
-            finalPeerList.add(
-                FinalPeerInfo(
-                    hostname = route.hostname,
-                    virtualIp = route.virtualIp,
-                    isDirectConnection = false,
-                    connectionDetails = "通过 $nextHopHostname",
-                    latency = "${route.pathLatency} ms (路径)",
-                    traffic = "N/A"
-                )
-            )
-        }
-    }
-
-    return DetailedNetworkInfo(
-        myNode = myNode,
-        events = events,
-        finalPeerList = finalPeerList.sortedBy { it.hostname }
-    )
-}
-
-// -- 解析 "my_node_info" --
-private fun parseMyNodeInfo(myNodeJson: JSONObject): MyNodeInfo {
-    val myStunInfoJson = myNodeJson.getJSONObject("stun_info")
-    val ipsJson = myNodeJson.getJSONObject("ips")
-
-    val virtualIpv4Json = myNodeJson.getJSONObject("virtual_ipv4")
-    val virtualIpAddr = parseIntegerToIp(virtualIpv4Json.getJSONObject("address").getInt("addr"))
-    val virtualIpPrefix = virtualIpv4Json.getInt("network_length")
-    val virtualIp = "$virtualIpAddr/$virtualIpPrefix"
-
-    val listenersArray = myNodeJson.getJSONArray("listeners")
-    val listenersList = (0 until listenersArray.length()).map {
-        listenersArray.getJSONObject(it).getString("url")
-    }
-
-    val interfaceIpsArray = ipsJson.getJSONArray("interface_ipv4s")
-    val interfaceIpsList = (0 until interfaceIpsArray.length()).map {
-        parseIntegerToIp(interfaceIpsArray.getJSONObject(it).getInt("addr"))
-    }
-
-    val publicIpsArray = myStunInfoJson.getJSONArray("public_ip")
-    val publicIpsStr = if (publicIpsArray.length() > 0) {
-        (0 until publicIpsArray.length()).joinToString(", ") { publicIpsArray.getString(it) }
-    } else {
-        "N/A"
-    }
-
-    return MyNodeInfo(
-        hostname = myNodeJson.getString("hostname"),
-        version = myNodeJson.getString("version"),
-        virtualIp = virtualIp,
-        publicIp = publicIpsStr,
-        natType = parseNatType(myStunInfoJson.getInt("udp_nat_type")),
-        listeners = listenersList,
-        interfaceIps = interfaceIpsList
-    )
-}
-
-// -- 解析 "events" --
-private fun parseEvents(eventsJson: org.json.JSONArray): List<EventInfo> {
-    val eventList = mutableListOf<EventInfo>()
-    for (i in 0 until eventsJson.length()) {
-        val eventStr = eventsJson.getString(i)
-        val eventJson = JSONObject(eventStr)
-        val time = eventJson.getString("time").substring(11, 19) // 提取 H:M:S
-        val message =
-            eventJson.getJSONObject("event").toString().replace("\"", "").replace(":", ": ")
-                .replace(",", ", ")
-        eventList.add(EventInfo(time, message))
-    }
-    return eventList.take(20) // 最多显示最近20条
-}
-
-// -- 解析 "routes" --
-private fun parseRoutes(routesJson: org.json.JSONArray): Map<Long, RouteData> {
-    val routesMap = mutableMapOf<Long, RouteData>()
-    for (i in 0 until routesJson.length()) {
-        val route = routesJson.getJSONObject(i)
-        val peerId = route.getLong("peer_id")
-
-        val ipv4AddrJson = route.optJSONObject("ipv4_addr")
-        val virtualIp = if (ipv4AddrJson != null) {
-            parseIntegerToIp(ipv4AddrJson.getJSONObject("address").getInt("addr"))
-        } else {
-            "无虚拟IP"
-        }
-
-        routesMap[peerId] = RouteData(
-            peerId = peerId,
-            hostname = route.getString("hostname"),
-            virtualIp = virtualIp,
-            nextHopPeerId = route.getLong("next_hop_peer_id"),
-            pathLatency = route.getInt("path_latency"),
-            cost = route.getInt("cost")
-        )
-    }
-    return routesMap
-}
-
-// -- 解析 "peers" --
-private fun parsePeers(peersJson: org.json.JSONArray): Map<Long, PeerConnectionData> {
-    val peersMap = mutableMapOf<Long, PeerConnectionData>()
-    for (i in 0 until peersJson.length()) {
-        val peer = peersJson.getJSONObject(i)
-        val conns = peer.getJSONArray("conns")
-        if (conns.length() > 0) {
-            val conn = conns.getJSONObject(0) // 只取第一个连接
-            val peerId = conn.getLong("peer_id")
-
-            peersMap[peerId] = PeerConnectionData(
-                peerId = peerId,
-                physicalAddr = conn.getJSONObject("tunnel").getJSONObject("remote_addr")
-                    .getString("url"),
-                latencyUs = conn.getJSONObject("stats").getLong("latency_us"),
-                rxBytes = conn.getJSONObject("stats").getLong("rx_bytes"),
-                txBytes = conn.getJSONObject("stats").getLong("tx_bytes")
-            )
-        }
-    }
-    return peersMap
 }

@@ -3,8 +3,7 @@
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.jetbrainsKotlinAndroid)
-    alias(libs.plugins.wire) // 应用 Wire 插件
-    // id("org.jetbrains.kotlin.kapt") // 移除 Kapt 插件
+    alias(libs.plugins.wire)
 }
 
 android {
@@ -52,10 +51,8 @@ android {
         }
     }
 
-    // 修改 sourceSets，移除不标准的目录
     sourceSets {
         getByName("main") {
-            // 使用我们找到的、包含 'debug' 的确切路径
             java.srcDir("build/generated/source/wire/debug")
         }
     }
@@ -63,7 +60,6 @@ android {
 
 wire {
     kotlin {
-        // 添加下面这一行！
         rpcRole = "none"
     }
     sourcePath {
@@ -80,17 +76,17 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation(libs.androidx.appcompat) // 如果你还在用 AppCompat 的组件
-    implementation(libs.androidx.constraintlayout) // 添加这一行
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.constraintlayout)
 
-    // Moshi 和 Wire 的依赖
     implementation(libs.moshi)
+    implementation(libs.moshi.kotlin)
     implementation(libs.wire.runtime)
     implementation(libs.wire.moshi.adapter)
 
-    // 移除了 `kapt 'com.squareup.wire:wire-compiler:...'`
-
-    // 测试依赖
+    implementation(libs.androidx.datastore.preferences)
+ 
+     // 测试依赖
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
