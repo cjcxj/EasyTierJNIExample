@@ -85,8 +85,11 @@ dependencies {
     implementation(libs.wire.moshi.adapter)
 
     implementation(libs.androidx.datastore.preferences)
- 
-     // 测试依赖
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+
+    // 测试依赖
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
