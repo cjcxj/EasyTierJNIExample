@@ -1,6 +1,8 @@
 package com.easytier.app.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
@@ -10,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.easytier.jni.FinalPeerInfo
+import com.easytier.app.ui.common.StatusRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -26,27 +29,51 @@ fun PeerDetailScreen(peer: FinalPeerInfo, onBack: () -> Unit) {
             )
         }
     ) { paddingValues ->
+        //使用可滚动的Column并增加卡片间距
         Column(
             modifier = Modifier
                 .padding(paddingValues)
                 .padding(16.dp)
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // --- 卡片1: 连接状态 ---
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("连接状态", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Divider(Modifier.padding(vertical = 8.dp))
-                    
+
                     StatusRow("节点名称:", peer.hostname)
                     StatusRow("虚拟 IP:", peer.virtualIp)
                     StatusRow("连接类型:", if (peer.isDirectConnection) "直连 (P2P)" else "中转 (Relay)")
                     StatusRow(if (peer.isDirectConnection) "物理地址/端口:" else "下一跳节点:", peer.connectionDetails)
-                    StatusRow("延迟 (ms):", peer.latency)
+                }
+            }
+
+            // --- 卡片2: 性能与路由 ---
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("性能与路由", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Divider(Modifier.padding(vertical = 8.dp))
+
+                    StatusRow("延迟:", peer.latency)
                     StatusRow("收/发流量:", peer.traffic)
-                    
-                    // 假设可以在 FinalPeerInfo 中添加更多连接信息
-                    // Text("\n所有连接信息:", style = MaterialTheme.typography.titleMedium)
-                    // ... (如果 FinalPeerInfo 包含完整的 ConnectionData 列表，可以在此展示)
+                    StatusRow("路由成本(Cost):", peer.routeCost.toString())
+                    StatusRow("下一跳ID:", peer.nextHopPeerId.toString())
+                }
+            }
+
+            // --- 卡片3: 节点信息 ---
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("节点信息", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Divider(Modifier.padding(vertical = 8.dp))
+
+                    StatusRow("版本号:", peer.version)
+                    StatusRow("NAT 类型:", peer.natType)
+                    StatusRow("节点ID (Peer ID):", peer.peerId.toString())
+                    StatusRow("实例ID:", peer.instId)
                 }
             }
         }

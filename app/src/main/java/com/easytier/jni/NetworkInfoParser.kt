@@ -32,6 +32,7 @@ object NetworkInfoParser {
         routesMap.values.forEach { route ->
             val peerConn = peersMap[route.peerId]
             if (peerConn != null) {
+                // --- 情况A: 直连节点 ---
                 finalPeerList.add(
                     FinalPeerInfo(
                         hostname = route.hostname,
@@ -39,10 +40,17 @@ object NetworkInfoParser {
                         isDirectConnection = true,
                         connectionDetails = peerConn.physicalAddr,
                         latency = "${peerConn.latencyUs / 1000} ms",
-                        traffic = "${formatBytes(peerConn.rxBytes)} / ${formatBytes(peerConn.txBytes)}"
+                        traffic = "${formatBytes(peerConn.rxBytes)} / ${formatBytes(peerConn.txBytes)}",
+                        version = route.version,
+                        natType = route.natType,
+                        routeCost = route.cost,
+                        nextHopPeerId = route.nextHopPeerId,
+                        peerId = route.peerId,
+                        instId = route.instId
                     )
                 )
             } else {
+                // --- 情况B: 中转节点 ---
                 val nextHopHostname = routesMap[route.nextHopPeerId]?.hostname ?: "未知"
                 finalPeerList.add(
                     FinalPeerInfo(
@@ -51,7 +59,13 @@ object NetworkInfoParser {
                         isDirectConnection = false,
                         connectionDetails = "通过 $nextHopHostname",
                         latency = "${route.pathLatency} ms (路径)",
-                        traffic = "N/A"
+                        traffic = "N/A",
+                        version = route.version,
+                        natType = route.natType,
+                        routeCost = route.cost,
+                        nextHopPeerId = route.nextHopPeerId,
+                        peerId = route.peerId,
+                        instId = route.instId
                     )
                 )
             }
@@ -109,13 +123,17 @@ object NetworkInfoParser {
             val peerId = route.getLong("peer_id")
             val ipv4AddrJson = route.optJSONObject("ipv4_addr")
             val virtualIp = if (ipv4AddrJson != null) parseIntegerToIp(ipv4AddrJson.getJSONObject("address").getInt("addr")) else "无虚拟IP"
+
             peerId to RouteData(
                 peerId = peerId,
                 hostname = route.getString("hostname"),
                 virtualIp = virtualIp,
                 nextHopPeerId = route.getLong("next_hop_peer_id"),
                 pathLatency = route.getInt("path_latency"),
-                cost = route.getInt("cost")
+                cost = route.getInt("cost"),
+                version = route.getString("version"),
+                natType = parseNatType(route.getJSONObject("stun_info").getInt("udp_nat_type")),
+                instId = route.getString("inst_id")
             )
         }
     }
@@ -184,8 +202,15 @@ data class MyNodeInfo(
 data class EventInfo(val time: String, val message: String)
 
 data class RouteData(
-    val peerId: Long, val hostname: String, val virtualIp: String,
-    val nextHopPeerId: Long, val pathLatency: Int, val cost: Int
+    val peerId: Long,
+    val hostname: String,
+    val virtualIp: String,
+    val nextHopPeerId: Long,
+    val pathLatency: Int,
+    val cost: Int,
+    val version: String,
+    val natType: String,
+    val instId: String
 )
 
 data class PeerConnectionData(
@@ -194,6 +219,16 @@ data class PeerConnectionData(
 )
 
 data class FinalPeerInfo(
-    val hostname: String, val virtualIp: String, val isDirectConnection: Boolean,
-    val connectionDetails: String, val latency: String, val traffic: String
+    val hostname: String,
+    val virtualIp: String,
+    val isDirectConnection: Boolean,
+    val connectionDetails: String,
+    val latency: String,
+    val traffic: String,
+    val version: String,
+    val natType: String,
+    val routeCost: Int,
+    val nextHopPeerId: Long,
+    val peerId: Long,
+    val instId: String
 )
