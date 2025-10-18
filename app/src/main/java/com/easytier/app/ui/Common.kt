@@ -16,6 +16,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import android.widget.Toast
+import androidx.compose.ui.tooling.preview.Preview
+
 
 /**
  * 一个通用的“标签-值”对显示行。
@@ -72,4 +74,14 @@ fun StatusRow(
             modifier = Modifier.weight(0.6f)
         )
     }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun StatusRowPreview() {
+    StatusRow(
+        label = "示例标签",
+        value = "示例值",
+        isCopyable = true
+    )
 }
