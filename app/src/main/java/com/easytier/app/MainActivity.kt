@@ -11,7 +11,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.NavType
@@ -22,15 +24,14 @@ import androidx.navigation.navArgument
 import com.easytier.app.ui.MainScreen
 import com.easytier.app.ui.MainViewModel
 import com.easytier.app.ui.PeerDetailScreen
+import kotlinx.coroutines.flow.collectLatest
 
 // 【导航路由常量】
-// 定义清晰的路由结构，方便管理和调用
 sealed class Screen(val route: String) {
     object Main : Screen("main")
     object PeerDetail : Screen("peer_detail/{peerId}") {
         fun createRoute(peerId: Long) = "peer_detail/$peerId"
     }
-    object ConfigManagement : Screen("config_management")
 }
 
 class MainActivity : ComponentActivity() {
@@ -61,15 +62,26 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
+
+            val context = LocalContext.current // 获取当前 Composable 的 Context
+
+            // 使用 LaunchedEffect 来监听 ViewModel 的事件 Flow
+            LaunchedEffect(key1 = true) {
+                viewModel.toastEvents.collectLatest { message ->
+                    // 当收到新消息时，显示 Toast
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                }
+            }
+
             MaterialTheme {
                 val navController = rememberNavController()
 
                 // 从 ViewModel 获取所有状态
                 val allConfigs by viewModel.allConfigs
                 val activeConfig by viewModel.activeConfig
-                val status by viewModel.status
-                val isRunning by viewModel.isRunning
-                val detailedInfo by viewModel.detailedInfo
+                val status by viewModel.statusState // `status` -> `statusState`
+                val detailedInfo by viewModel.detailedInfoState // `detailedInfo` -> `detailedInfoState`
+                val isRunning = viewModel.isRunning // 直接从 ViewModel 的 getter 属性获取
 
                 NavHost(navController = navController, startDestination = Screen.Main.route) {
                     // 主屏幕路由
@@ -80,13 +92,16 @@ class MainActivity : ComponentActivity() {
                             activeConfig = activeConfig,
                             onActiveConfigChange = viewModel::setActiveConfig,
                             onConfigChange = viewModel::updateConfig,
+                            onAddNewConfig = viewModel::addNewConfig,
+                            onDeleteConfig = viewModel::deleteConfig,
                             status = status,
                             isRunning = isRunning,
                             onControlButtonClick = {
                                 viewModel.handleControlButtonClick(this@MainActivity)
                             },
                             detailedInfo = detailedInfo,
-                            onRefreshDetailedInfo = { viewModel.manualRefreshDetailedInfo() }
+                            onRefreshDetailedInfo = { viewModel.manualRefreshDetailedInfo() },
+                            onCopyJsonClick = viewModel::copyJsonToClipboard
                         )
                     }
 
@@ -105,7 +120,7 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navController.popBackStack() }
                             )
                         } else {
-
+                            // Can show a loading or error UI here
                         }
                     }
                 }

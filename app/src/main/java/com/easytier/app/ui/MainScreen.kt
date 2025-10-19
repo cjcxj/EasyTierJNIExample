@@ -15,43 +15,28 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.easytier.app.ConfigData
+import com.easytier.app.Screen
 import com.easytier.app.ui.common.StatusRow
 import com.easytier.jni.DetailedNetworkInfo
-import com.easytier.jni.EasyTierJNI
 import com.easytier.jni.EasyTierManager
 import com.easytier.jni.EventInfo
 import com.easytier.jni.FinalPeerInfo
 import kotlinx.coroutines.launch
 
-// 定义标签页的数据结构
 data class TabItem(val title: String, val icon: ImageVector)
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -62,13 +47,15 @@ fun MainScreen(
     activeConfig: ConfigData,
     onActiveConfigChange: (ConfigData) -> Unit,
     onConfigChange: (ConfigData) -> Unit,
+    onAddNewConfig: () -> Unit,
+    onDeleteConfig: (ConfigData) -> Unit,
     status: EasyTierManager.EasyTierStatus?,
     isRunning: Boolean,
     onControlButtonClick: () -> Unit,
     detailedInfo: DetailedNetworkInfo?,
-    onRefreshDetailedInfo: () -> Unit
+    onRefreshDetailedInfo: () -> Unit,
+    onCopyJsonClick: () -> Unit
 ) {
-    val viewModel: MainViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 
     // --- 标签页设置 ---
     val tabs = listOf(
@@ -78,8 +65,15 @@ fun MainScreen(
     )
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val coroutineScope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
+
+    // 使用 LaunchedEffect 监听 isRunning 的变化。
+    // key1 = isRunning 意味着只有当 isRunning 的值改变时，这个 Effect 才会重新执行。
+    LaunchedEffect(key1 = isRunning) {
+        if (isRunning) {
+            // 立即切换到“状态”标签页 (索引 1)
+            pagerState.animateScrollToPage(1)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -97,84 +91,42 @@ fun MainScreen(
                 .padding(paddingValues)
                 .fillMaxSize()
         ) {
-            // --- 标签栏 (TabRow) ---
             TabRow(selectedTabIndex = pagerState.currentPage) {
                 tabs.forEachIndexed { index, tabItem ->
                     Tab(
                         selected = pagerState.currentPage == index,
-                        onClick = {
-                            coroutineScope.launch { pagerState.animateScrollToPage(index) }
-                        },
+                        onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
                         text = { Text(tabItem.title) },
                         icon = { Icon(tabItem.icon, contentDescription = tabItem.title) }
                     )
                 }
             }
 
-            // --- 页面内容 (HorizontalPager) ---
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
-                // 根据当前页面索引，显示不同的内容
                 when (page) {
                     0 -> ControlTab(
                         allConfigs = allConfigs,
                         activeConfig = activeConfig,
                         onActiveConfigChange = onActiveConfigChange,
-                        onAddNewConfig = viewModel::addNewConfig,
-                        onDeleteConfig = viewModel::deleteConfig,
-                        isRunning = isRunning,
+                        onAddNewConfig = onAddNewConfig,
+                        onDeleteConfig = onDeleteConfig,
                         onConfigChange = onConfigChange,
-                        onControlButtonClick = {
-                            onControlButtonClick()
-                            // 只有在服务启动时才跳转到状态标签页
-                            if (!isRunning) {
-                                coroutineScope.launch {
-                                    pagerState.animateScrollToPage(1) // 切换到状态标签页
-                                }
-                            }
-                        }
+                        isRunning = isRunning,
+                        onControlButtonClick = onControlButtonClick
                     )
-
                     1 -> StatusTab(
                         status = status,
                         isRunning = isRunning,
                         detailedInfo = detailedInfo,
                         onRefreshDetailedInfo = onRefreshDetailedInfo,
                         onPeerClick = { peer ->
-                            navController.navigate(
-                                com.easytier.app.Screen.PeerDetail.createRoute(
-                                    peer.peerId
-                                )
-                            )
+                            navController.navigate(Screen.PeerDetail.createRoute(peer.peerId))
                         },
-                        onCopyJsonClick = {
-                            if (isRunning) {
-                                coroutineScope.launch {
-                                    val jsonString = EasyTierJNI.collectNetworkInfos(10)
-                                    if (!jsonString.isNullOrBlank()) {
-                                        clipboardManager.setText(AnnotatedString(jsonString))
-                                        Toast.makeText(
-                                            context,
-                                            "网络信息 (JSON) 已复制",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    } else {
-                                        Toast.makeText(context, "获取信息失败", Toast.LENGTH_SHORT)
-                                            .show()
-                                    }
-                                }
-                            } else {
-                                Toast.makeText(
-                                    context,
-                                    "服务未运行，无法复制信息",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        }
+                        onCopyJsonClick = onCopyJsonClick
                     )
-
                     2 -> LogTab(detailedInfo = detailedInfo)
                 }
             }
@@ -601,7 +553,7 @@ fun DetailedInfoCard(
             Button(
                 onClick = onCopyJsonClick,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = isRunning
+                enabled = isRunning // 使用传入的 isRunning 状态
             ) {
                 Text("复制网络信息 (JSON)")
             }
