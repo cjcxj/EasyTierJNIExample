@@ -26,7 +26,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.IOException
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -54,7 +53,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val detailedInfoState: State<DetailedNetworkInfo?> = _detailedInfoState
 
     private val _fullEventHistory = mutableStateOf<List<EventInfo>>(emptyList())
-    val fullEventHistory: State<List<EventInfo>> = _fullEventHistory
+    // 只存储完整的、原始的事件JSON字符串
+    private val _fullRawEventHistory = mutableStateOf<List<String>>(emptyList())
+    val fullRawEventHistory: State<List<String>> = _fullRawEventHistory
 
     val isRunning: Boolean
         get() = _statusState.value?.isRunning == true
@@ -130,7 +131,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // 1. 在删除之前，记录下被删除项的索引
+        // 1在删除之前，记录下被删除项的索引
         val deletedIndex = currentConfigs.indexOfFirst { it.id == config.id }
 
         // 如果由于某种原因没找到，则不执行任何操作
@@ -139,13 +140,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // 2. 创建一个新的、不包含被删除项的列表
+        // 创建一个新的、不包含被删除项的列表
         val newList = currentConfigs.filterNot { it.id == config.id }
         _allConfigs.value = newList
 
-        // 3. 只有当被删除的配置是当前激活的配置时，才需要重新设置激活配置
+        // 只有当被删除的配置是当前激活的配置时，才需要重新设置激活配置
         if (_activeConfig.value.id == config.id) {
-            // 4. 决定下一个激活项的索引
+            // 决定下一个激活项的索引
             // 如果被删除的是第一个，新的激活项就是新的第一个（索引仍为0）。
             // 否则，新的激活项就是被删除项的前一个（索引为 deletedIndex - 1）。
             val nextActiveIndex = (deletedIndex - 1).coerceAtLeast(0)
@@ -154,7 +155,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             setActiveConfig(newList[nextActiveIndex])
         }
 
-        // 5. 将更新后的完整列表保存到 DataStore
+        // 将更新后的完整列表保存到 DataStore
         viewModelScope.launch {
             settingsRepository.saveAllConfigs(newList)
         }
@@ -186,7 +187,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         easyTierManager = null
         _statusState.value = null
         _detailedInfoState.value = null
-        _fullEventHistory.value = emptyList() // 清空历史日志
+        _fullEventHistory.value = emptyList() // 清空UI用的日志
+        _fullRawEventHistory.value = emptyList() //清空原始日志历史
     }
 
     override fun onCleared() {
@@ -227,16 +229,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun collectNewEvents() {
+        if (!isRunning) return
+
         val fullJsonString = getRawJsonForClipboard() ?: return
-        val snapshotEvents = withContext(Dispatchers.Default) {
-            NetworkInfoParser.extractAndParseEvents(fullJsonString, _activeConfig.value.instanceName)
+
+        // 1. 直接从快照中提取原始事件字符串列表
+        val snapshotRawEvents = withContext(Dispatchers.Default) {
+            NetworkInfoParser.extractRawEventStrings(fullJsonString, _activeConfig.value.instanceName)
         }
-        if (snapshotEvents.isEmpty()) return
-        val currentHistory = _fullEventHistory.value
-        val lastTimestamp = currentHistory.lastOrNull()?.rawTime ?: ""
-        val newEventsToAdd = snapshotEvents.filter { it.rawTime > lastTimestamp }
-        if (newEventsToAdd.isNotEmpty()) {
-            _fullEventHistory.value = currentHistory + newEventsToAdd
+
+        if (snapshotRawEvents.isEmpty()) return
+
+        // 2. 使用原始字符串进行高效去重
+        val currentHistory = _fullRawEventHistory.value
+        val lastKnownEvent = currentHistory.lastOrNull()
+
+        val newRawEventsToAdd = if (lastKnownEvent != null) {
+            val lastIndex = snapshotRawEvents.lastIndexOf(lastKnownEvent)
+            if (lastIndex != -1) {
+                snapshotRawEvents.subList(lastIndex + 1, snapshotRawEvents.size)
+            } else {
+                Log.w(TAG, "Log buffer wrap-around detected. History may have gaps.")
+                snapshotRawEvents // 缓冲区轮转，接受所有新日志
+            }
+        } else {
+            snapshotRawEvents // 首次收集
+        }
+
+        // 3. 如果有新事件，直接添加到历史记录
+        if (newRawEventsToAdd.isNotEmpty()) {
+            _fullRawEventHistory.value = currentHistory + newRawEventsToAdd
         }
     }
 
@@ -266,18 +288,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * 获取用于“导出”功能的、格式化后的人类可读日志字符串。
+     * 这个方法的数据源是 _fullEventHistory，确保了日志的完整性。
+     */
+    fun getFormattedLogsForExport(): String? {
+        // 从 _fullEventHistory 获取完整的、不断累积的事件列表
+        val events = _fullEventHistory.value
+
+        if (events.isEmpty()) {
+            return null // 如果没有历史记录，返回 null
+        }
+
+        // 将 EventInfo 对象列表格式化为一个单一的、多行的字符串
+        return events.joinToString(separator = "\n") { event ->
+            "[${event.time}] [${event.level}] ${event.message}"
+        }
+    }
+
+    /**
+     * 导出原始事件的方法
+     */
     suspend fun getRawEventsJsonForExport(): String? {
-        val fullJsonString = getRawJsonForClipboard() ?: return null
+        val rawEvents = _fullRawEventHistory.value
+        if (rawEvents.isEmpty()) return null
+
+        // 直接将原始字符串列表拼接成一个格式化的JSON数组字符串
         return withContext(Dispatchers.Default) {
-            try {
-                val root = JSONObject(fullJsonString)
-                val instance = root.getJSONObject("map").getJSONObject(_activeConfig.value.instanceName)
-                val eventsArray = instance.getJSONArray("events")
-                eventsArray.toString(4)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to extract raw events JSON", e)
-                null
-            }
+            rawEvents.joinToString(
+                separator = ",\n    ",
+                prefix = "[\n    ",
+                postfix = "\n]"
+            )
         }
     }
 

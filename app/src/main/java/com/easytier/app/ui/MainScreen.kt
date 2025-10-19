@@ -35,6 +35,7 @@ import com.easytier.jni.DetailedNetworkInfo
 import com.easytier.jni.EasyTierManager
 import com.easytier.jni.EventInfo
 import com.easytier.jni.FinalPeerInfo
+import com.easytier.jni.NetworkInfoParser
 import kotlinx.coroutines.launch
 
 data class TabItem(val title: String, val icon: ImageVector)
@@ -53,7 +54,7 @@ fun MainScreen(
     isRunning: Boolean,
     onControlButtonClick: () -> Unit,
     detailedInfo: DetailedNetworkInfo?,
-    fullEventHistory: List<EventInfo>,
+    rawEventHistory: List<String>,
     onRefreshDetailedInfo: () -> Unit,
     onCopyJsonClick: () -> Unit,
     onExportLogsClicked: () -> Unit
@@ -110,7 +111,7 @@ fun MainScreen(
                         onCopyJsonClick = onCopyJsonClick
                     )
                     2 -> LogTab(
-                        events = fullEventHistory,
+                        rawEvents = rawEventHistory,
                         onExportClicked = onExportLogsClicked
                     )
                 }
@@ -232,19 +233,15 @@ fun StatusTab(
 }
 
 @Composable
-fun LogTab(events: List<EventInfo>, onExportClicked: () -> Unit) {
-    // 创建并记住 LazyColumn 的滚动状态
-    val lazyListState = rememberLazyListState()
+fun LogTab(rawEvents: List<String>, onExportClicked: () -> Unit) {
 
-    // 使用 LaunchedEffect 来观察日志列表的大小。
-    // `key1 = events.size` 意味着只有当日志数量变化时，这个协程才会重新启动。
-    LaunchedEffect(key1 = events.size) {
-        // 确保列表不为空
-        if (events.isNotEmpty()) {
-            // 动画地滚动到列表的第一项。
-            // 因为使用了 `reverseLayout = true`，所以列表的第一项 (index 0)
-            // 在视觉上会显示在最底部。
-            lazyListState.animateScrollToItem(index = 0)
+    // 使用 remember 和 derivedStateOf 进行按需解析，以优化性能
+    val parsedEvents by remember(rawEvents) {
+        derivedStateOf {
+            // 只有当 rawEvents 列表实例变化时，才会重新执行这里的解析代码
+            rawEvents.mapNotNull { eventString ->
+                NetworkInfoParser.parseSingleRawEvent(eventString)
+            }
         }
     }
 
@@ -255,7 +252,7 @@ fun LogTab(events: List<EventInfo>, onExportClicked: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("事件日志", style = MaterialTheme.typography.titleLarge)
-            OutlinedButton(onClick = onExportClicked, enabled = events.isNotEmpty()) {
+            OutlinedButton(onClick = onExportClicked, enabled = parsedEvents.isNotEmpty()) {
                 Icon(Icons.Default.Save, "导出", modifier = Modifier.size(ButtonDefaults.IconSize))
                 Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                 Text("导出原始日志")
@@ -264,29 +261,37 @@ fun LogTab(events: List<EventInfo>, onExportClicked: () -> Unit) {
 
         Spacer(Modifier.height(8.dp))
 
-        if (events.isEmpty()) {
-            Box(Modifier.fillMaxSize(), Alignment.Center) {
+        if (parsedEvents.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 Text("服务运行时将显示事件日志。")
             }
         } else {
+            val lazyListState = rememberLazyListState()
+            LaunchedEffect(parsedEvents.size) {
+                if (parsedEvents.isNotEmpty()) {
+                    lazyListState.animateScrollToItem(0)
+                }
+            }
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black, RoundedCornerShape(8.dp))
                     .padding(horizontal = 8.dp, vertical = 4.dp),
-                // 将创建的状态与 LazyColumn 关联起来
                 state = lazyListState,
-                // 保持 reverseLayout = true，这对于日志显示非常关键
-                reverseLayout = true
+                reverseLayout = true,
             ) {
                 items(
-                    items = events.asReversed(), //反转列表，使最新的日志在数据上也是第一个
-                    key = { it.rawTime } // 使用唯一的时间戳作为 key，提高性能
+                    items = parsedEvents.asReversed(),
+                    key = { it.rawTime }
                 ) { event ->
                     val logColor = when (event.level) {
-                        EventInfo.Level.SUCCESS -> Color(0xFF81C784)
-                        EventInfo.Level.ERROR -> Color(0xFFE57373)
-                        EventInfo.Level.WARNING -> Color(0xFFFFD54F)
+                        EventInfo.Level.SUCCESS -> Color(0xFF00FF0A)
+                        EventInfo.Level.ERROR -> Color(0xFFFF0000)
+                        EventInfo.Level.WARNING -> Color(0xFFFFC400)
                         EventInfo.Level.INFO -> Color.White
                     }
                     Text(

@@ -119,7 +119,7 @@ class MainActivity : ComponentActivity() {
                 val activeConfig by viewModel.activeConfig
                 val status by viewModel.statusState // `status` -> `statusState`
                 val detailedInfo by viewModel.detailedInfoState // `detailedInfo` -> `detailedInfoState`
-                val fullEventHistory by viewModel.fullEventHistory
+                val fullRawEventHistory by viewModel.fullRawEventHistory
                 val isRunning = viewModel.isRunning // 直接从 ViewModel 的 getter 属性获取
 
                 NavHost(navController = navController, startDestination = Screen.Main.route) {
@@ -139,7 +139,7 @@ class MainActivity : ComponentActivity() {
                                 viewModel.handleControlButtonClick(this@MainActivity)
                             },
                             detailedInfo = detailedInfo,
-                            fullEventHistory = fullEventHistory,
+                            rawEventHistory = fullRawEventHistory,
                             onRefreshDetailedInfo = { viewModel.manualRefreshDetailedInfo() },
                             onCopyJsonClick = viewModel::copyJsonToClipboard,
                             onExportLogsClicked = ::launchCreateLogFile,
