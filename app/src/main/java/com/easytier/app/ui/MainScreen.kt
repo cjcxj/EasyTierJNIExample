@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -157,7 +158,12 @@ fun ControlTab(
             ) { Text(if (isRunning) "停止服务" else "启动服务", fontSize = 18.sp) }
 
             Box {
-                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "配置选项") }
+                IconButton(
+                    onClick = { showMenu = true },
+                    enabled = !isRunning,
+                ) {
+                    Icon(Icons.Default.MoreVert, "配置选项")
+                }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     allConfigs.forEach { config ->
                         DropdownMenuItem(
@@ -227,8 +233,27 @@ fun StatusTab(
 
 @Composable
 fun LogTab(events: List<EventInfo>, onExportClicked: () -> Unit) {
+    // 创建并记住 LazyColumn 的滚动状态
+    val lazyListState = rememberLazyListState()
+
+    // 使用 LaunchedEffect 来观察日志列表的大小。
+    // `key1 = events.size` 意味着只有当日志数量变化时，这个协程才会重新启动。
+    LaunchedEffect(key1 = events.size) {
+        // 确保列表不为空
+        if (events.isNotEmpty()) {
+            // 动画地滚动到列表的第一项。
+            // 因为使用了 `reverseLayout = true`，所以列表的第一项 (index 0)
+            // 在视觉上会显示在最底部。
+            lazyListState.animateScrollToItem(index = 0)
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text("事件日志", style = MaterialTheme.typography.titleLarge)
             OutlinedButton(onClick = onExportClicked, enabled = events.isNotEmpty()) {
                 Icon(Icons.Default.Save, "导出", modifier = Modifier.size(ButtonDefaults.IconSize))
@@ -236,22 +261,41 @@ fun LogTab(events: List<EventInfo>, onExportClicked: () -> Unit) {
                 Text("导出原始日志")
             }
         }
+
         Spacer(Modifier.height(8.dp))
+
         if (events.isEmpty()) {
-            Box(Modifier.fillMaxSize(), Alignment.Center) { Text("服务运行时将显示事件日志。") }
+            Box(Modifier.fillMaxSize(), Alignment.Center) {
+                Text("服务运行时将显示事件日志。")
+            }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize().background(Color.Black, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                // 将创建的状态与 LazyColumn 关联起来
+                state = lazyListState,
+                // 保持 reverseLayout = true，这对于日志显示非常关键
                 reverseLayout = true
             ) {
-                items(events) { event ->
+                items(
+                    items = events.asReversed(), //反转列表，使最新的日志在数据上也是第一个
+                    key = { it.rawTime } // 使用唯一的时间戳作为 key，提高性能
+                ) { event ->
                     val logColor = when (event.level) {
-                        EventInfo.Level.SUCCESS -> Color(0xFF81C784); EventInfo.Level.ERROR -> Color(0xFFE57373)
-                        EventInfo.Level.WARNING -> Color(0xFFFFD54F); EventInfo.Level.INFO -> Color.White
+                        EventInfo.Level.SUCCESS -> Color(0xFF81C784)
+                        EventInfo.Level.ERROR -> Color(0xFFE57373)
+                        EventInfo.Level.WARNING -> Color(0xFFFFD54F)
+                        EventInfo.Level.INFO -> Color.White
                     }
                     Text(
-                        "[${event.time}] ${event.message}", color = logColor, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        fontSize = 11.sp, lineHeight = 14.sp, modifier = Modifier.padding(vertical = 2.dp)
+                        "[${event.time}] ${event.message}",
+                        color = logColor,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        modifier = Modifier.padding(vertical = 2.dp)
                     )
                 }
             }

@@ -122,16 +122,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteConfig(config: ConfigData) {
-        if (_allConfigs.value.size <= 1) {
+        val currentConfigs = _allConfigs.value
+
+        // 保护逻辑：不允许删除最后一个配置
+        if (currentConfigs.size <= 1) {
             viewModelScope.launch { _toastEvents.emit("无法删除最后一个配置") }
             return
         }
-        _allConfigs.value = _allConfigs.value.filterNot { it.id == config.id }
-        if (_activeConfig.value.id == config.id) {
-            setActiveConfig(_allConfigs.value.first())
+
+        // 1. 在删除之前，记录下被删除项的索引
+        val deletedIndex = currentConfigs.indexOfFirst { it.id == config.id }
+
+        // 如果由于某种原因没找到，则不执行任何操作
+        if (deletedIndex == -1) {
+            Log.w(TAG, "Attempted to delete a config that does not exist in the list.")
+            return
         }
+
+        // 2. 创建一个新的、不包含被删除项的列表
+        val newList = currentConfigs.filterNot { it.id == config.id }
+        _allConfigs.value = newList
+
+        // 3. 只有当被删除的配置是当前激活的配置时，才需要重新设置激活配置
+        if (_activeConfig.value.id == config.id) {
+            // 4. 决定下一个激活项的索引
+            // 如果被删除的是第一个，新的激活项就是新的第一个（索引仍为0）。
+            // 否则，新的激活项就是被删除项的前一个（索引为 deletedIndex - 1）。
+            val nextActiveIndex = (deletedIndex - 1).coerceAtLeast(0)
+
+            // 从新列表中获取下一个要激活的配置并设置
+            setActiveConfig(newList[nextActiveIndex])
+        }
+
+        // 5. 将更新后的完整列表保存到 DataStore
         viewModelScope.launch {
-            settingsRepository.saveAllConfigs(_allConfigs.value)
+            settingsRepository.saveAllConfigs(newList)
         }
     }
 
