@@ -2,7 +2,6 @@ package com.easytier.app
 
 import android.app.Activity
 import android.app.Application
-import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
 import android.util.Log
@@ -31,23 +30,8 @@ sealed class Screen(val route: String) {
     object PeerDetail : Screen("peer_detail/{peerId}") {
         fun createRoute(peerId: Long) = "peer_detail/$peerId"
     }
+    object ConfigManagement : Screen("config_management")
 }
-
-data class ConfigData(
-    val hostname: String = "Android-Device",
-    val instanceName: String = "easytier",
-    val ipv4: String = "",
-    val dhcp: Boolean = true,
-    val listeners: String = "tcp://0.0.0.0:11010\nudp://0.0.0.0:11010\nwg://0.0.0.0:11011",
-    val rpcPortal: String = "0.0.0.0:0",
-    val networkName: String = "easytier",
-    val networkSecret: String = "",
-    val peers: String = "tcp://public.easytier.top:11010",
-    val enableKcpProxy: Boolean = false,
-    val enableQuicProxy: Boolean = false,
-    val latencyFirst: Boolean = false,
-    val privateMode: Boolean = false
-)
 
 class MainActivity : ComponentActivity() {
 
@@ -81,7 +65,8 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
 
                 // 从 ViewModel 获取所有状态
-                val configData by viewModel.configData
+                val allConfigs by viewModel.allConfigs
+                val activeConfig by viewModel.activeConfig
                 val status by viewModel.status
                 val isRunning by viewModel.isRunning
                 val detailedInfo by viewModel.detailedInfo
@@ -91,17 +76,17 @@ class MainActivity : ComponentActivity() {
                     composable(Screen.Main.route) {
                         MainScreen(
                             navController = navController,
-                            configData = configData,
-                            onConfigChange = viewModel::onConfigChange,
+                            allConfigs = allConfigs,
+                            activeConfig = activeConfig,
+                            onActiveConfigChange = viewModel::setActiveConfig,
+                            onConfigChange = viewModel::updateConfig,
                             status = status,
                             isRunning = isRunning,
                             onControlButtonClick = {
-                                // 将启动/停止的决策完全委托给 ViewModel
                                 viewModel.handleControlButtonClick(this@MainActivity)
                             },
                             detailedInfo = detailedInfo,
-                            // 手动刷新也通过 ViewModel
-                            onRefreshDetailedInfo = { viewModel.refreshDetailedInfo(true) }
+                            onRefreshDetailedInfo = { viewModel.manualRefreshDetailedInfo() }
                         )
                     }
 

@@ -8,55 +8,49 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
-import com.squareup.wire.WireJsonAdapterFactory
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import com.squareup.moshi.Types
 
-// 通过扩展属性在 Context 中创建 DataStore 实例
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
 class SettingsRepository(private val context: Context) {
 
-    // 定义用于存储配置 JSON 字符串的 Key
-    private val configKey = stringPreferencesKey("user_config")
+    private val allConfigsKey = stringPreferencesKey("all_user_configs")
+    private val activeConfigIdKey = stringPreferencesKey("active_config_id")
 
-    // 初始化 Moshi，使用 WireJsonAdapterFactory 来处理由 Wire 生成的数据类
     private val moshi = Moshi.Builder()
-        .add(WireJsonAdapterFactory())
         .add(KotlinJsonAdapterFactory())
         .build()
 
-    // 获取 ConfigData 的 JSON 适配器
-    private val configAdapter = moshi.adapter(ConfigData::class.java)
+    // Create an adapter for a List of ConfigData
+    private val configListAdapter = moshi.adapter<List<ConfigData>>(
+        Types.newParameterizedType(List::class.java, ConfigData::class.java)
+    )
 
-    /**
-     * 从 DataStore 加载配置。
-     * 如果没有保存的配置，则返回默认的 ConfigData 实例。
-     */
-    suspend fun loadConfig(): ConfigData {
-        val preferences = context.dataStore.data.first()
-        val configJson = preferences[configKey]
-        return if (configJson != null) {
-            try {
-                configAdapter.fromJson(configJson) ?: ConfigData()
-            } catch (e: Exception) {
-                // 解析失败时返回默认值
-                ConfigData()
-            }
+    suspend fun getAllConfigs(): List<ConfigData> {
+        val jsonString = context.dataStore.data.map { it[allConfigsKey] }.first()
+        return if (jsonString != null) {
+            configListAdapter.fromJson(jsonString) ?: listOf(ConfigData())
         } else {
-            // 没有找到保存的值，返回默认值
-            ConfigData()
+            listOf(ConfigData()) // If nothing is saved, return a default one
         }
     }
 
-    /**
-     * 将配置保存到 DataStore。
-     * @param configData 要保存的配置对象。
-     */
-    suspend fun saveConfig(configData: ConfigData) {
-        val configJson = configAdapter.toJson(configData)
+    suspend fun saveAllConfigs(configs: List<ConfigData>) {
+        val jsonString = configListAdapter.toJson(configs)
         context.dataStore.edit { settings ->
-            settings[configKey] = configJson
+            settings[allConfigsKey] = jsonString
+        }
+    }
+
+    suspend fun getActiveConfigId(): String? {
+        return context.dataStore.data.map { it[activeConfigIdKey] }.first()
+    }
+
+    suspend fun setActiveConfigId(id: String) {
+        context.dataStore.edit {
+            it[activeConfigIdKey] = id
         }
     }
 }

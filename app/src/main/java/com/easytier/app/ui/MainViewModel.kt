@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.State
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
@@ -30,7 +31,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var easyTierManager: EasyTierManager? = null
 
     // 状态变量
-    val configData = mutableStateOf(ConfigData())
+    private val _allConfigs = mutableStateOf<List<ConfigData>>(emptyList())
+    val allConfigs: State<List<ConfigData>> = _allConfigs
+
+    private val _activeConfig = mutableStateOf(ConfigData())
+    val activeConfig: State<ConfigData> = _activeConfig
     val status = mutableStateOf<EasyTierManager.EasyTierStatus?>(null)
     val isRunning = derivedStateOf { status.value?.isRunning == true }
     val detailedInfo = mutableStateOf<DetailedNetworkInfo?>(null)
@@ -38,8 +43,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // 启动时加载配置
         viewModelScope.launch {
-            // 加载失败时使用默认值，避免状态为null
-            configData.value = settingsRepository.loadConfig() ?: ConfigData()
+            loadAllConfigs()
         }
 
         // 启动轮询，获取状态和详细信息
@@ -59,10 +63,80 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 当UI层的配置发生变化时调用
      */
-    fun onConfigChange(newConfig: ConfigData) {
-        configData.value = newConfig
+
+    private suspend fun loadAllConfigs() {
+        val configs = settingsRepository.getAllConfigs()
+        _allConfigs.value = configs
+        val activeId = settingsRepository.getActiveConfigId()
+        _activeConfig.value = configs.find { it.id == activeId } ?: configs.first()
+    }
+
+    fun setActiveConfig(config: ConfigData) {
+        _activeConfig.value = config
         viewModelScope.launch {
-            settingsRepository.saveConfig(newConfig)
+            settingsRepository.setActiveConfigId(config.id)
+        }
+    }
+
+    fun updateConfig(newConfig: ConfigData) {
+        _activeConfig.value = newConfig
+        val currentList = _allConfigs.value.toMutableList()
+        val index = currentList.indexOfFirst { it.id == newConfig.id }
+        if (index != -1) {
+            currentList[index] = newConfig
+            _allConfigs.value = currentList
+            viewModelScope.launch {
+                settingsRepository.saveAllConfigs(currentList)
+            }
+        }
+    }
+
+    fun addNewConfig() {
+        val existingNames = _allConfigs.value.map { it.instanceName }
+        var newInstanceName = "easytier-${_allConfigs.value.size + 1}"
+        var i = 2
+        // Ensure the new name is unique
+        while (existingNames.contains(newInstanceName)) {
+            newInstanceName = "easytier-$i"
+            i
+        }
+
+        val newConfig = ConfigData(instanceName = newInstanceName)
+        val currentList = _allConfigs.value.toMutableList()
+        currentList.add(newConfig)
+        _allConfigs.value = currentList
+        // Automatically switch to the new config
+        setActiveConfig(newConfig)
+        // Save all configs
+        viewModelScope.launch {
+            settingsRepository.saveAllConfigs(currentList)
+        }
+    }
+
+    fun saveConfig(config: ConfigData) {
+        val currentList = _allConfigs.value.toMutableList()
+        val index = currentList.indexOfFirst { it.id == config.id }
+        if (index != -1) {
+            currentList[index] = config // Update existing
+        } else {
+            currentList.add(config) // Add new
+        }
+        _allConfigs.value = currentList
+        viewModelScope.launch {
+            settingsRepository.saveAllConfigs(currentList)
+        }
+    }
+
+    fun deleteConfig(config: ConfigData) {
+        val currentList = _allConfigs.value.toMutableList()
+        if (currentList.size <= 1) return // Do not delete the last one
+        currentList.remove(config)
+        _allConfigs.value = currentList
+        if (_activeConfig.value.id == config.id) {
+            setActiveConfig(currentList.first()) // Switch to first if active was deleted
+        }
+        viewModelScope.launch {
+            settingsRepository.saveAllConfigs(currentList)
         }
     }
 
@@ -86,13 +160,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Log.w(TAG, "EasyTier is already running.")
             return
         }
-        val configToml = generateTomlConfig(configData.value)
+
+        // 使用 _activeConfig.value 来生成配置
+        val configToml = generateTomlConfig(_activeConfig.value)
         Log.d(TAG, "Generated Config:\n$configToml")
 
         // 创建 EasyTierManager 实例
         easyTierManager = EasyTierManager(
             activity = activity,
-            instanceName = configData.value.instanceName,
+            instanceName = _activeConfig.value.instanceName, // 使用 _activeConfig.value
             networkConfig = configToml
         )
         easyTierManager?.start() // 启动服务
@@ -109,6 +185,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         detailedInfo.value = null
     }
 
+    fun manualRefreshDetailedInfo() {
+        viewModelScope.launch {
+            refreshDetailedInfo(showToast = true)
+        }
+    }
+
     /**
      * 刷新详细网络信息（带Toast的可选开关）
      */
@@ -117,7 +199,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // 在调用前再次检查，确保服务仍在运行
             if (easyTierManager == null || !isRunning.value) {
                 detailedInfo.value = null
-                if (showToast) Toast.makeText(getApplication(), "服务未运行", Toast.LENGTH_SHORT).show()
+                if (showToast) Toast.makeText(getApplication(), "服务未运行", Toast.LENGTH_SHORT)
+                    .show()
                 return@launch
             }
 
@@ -127,7 +210,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // 通过 manager 获取 JSON 字符串
                     val jsonString = EasyTierJNI.collectNetworkInfos(10)
                     if (jsonString != null) {
-                        NetworkInfoParser.parse(jsonString, configData.value.instanceName)
+                        NetworkInfoParser.parse(jsonString, _activeConfig.value.instanceName)
                     } else {
                         null
                     }
@@ -136,7 +219,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // 如果需要显示Toast，必须切回主线程
                     if (showToast) {
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(getApplication(), "解析信息失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                getApplication(),
+                                "解析信息失败: ${e.message}",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     }
                     null
@@ -192,21 +279,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             latency_first = ${data.latencyFirst}
             private_mode = ${data.privateMode}
         """.trimIndent()
-    }
-
-    /**
-     * 供UI层调用，以获取用于复制到剪贴板的原始JSON字符串。
-     * 这是一个 suspend 函数，以确保JNI调用在后台进行。
-     * @return 原始JSON字符串，如果失败则返回null。
-     */
-    suspend fun getRawJsonForClipboard(): String? {
-        return withContext(Dispatchers.IO) {
-            try {
-                EasyTierJNI.collectNetworkInfos(10)
-            } catch (e: Exception) {
-                Log.e(TAG, "getRawJsonForClipboard failed", e)
-                null
-            }
-        }
     }
 }

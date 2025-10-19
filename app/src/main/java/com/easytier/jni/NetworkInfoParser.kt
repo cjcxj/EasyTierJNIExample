@@ -108,13 +108,60 @@ object NetworkInfoParser {
     }
 
     private fun parseEvents(eventsJson: org.json.JSONArray): List<EventInfo> {
-        return (0 until eventsJson.length()).map {
-            val eventStr = eventsJson.getString(it)
-            val eventJson = JSONObject(eventStr)
-            val time = eventJson.getString("time").substring(11, 19)
-            val message = eventJson.getJSONObject("event").toString().replace("\"", "").replace(":", ": ").replace(",", ", ")
-            EventInfo(time, message)
-        }.take(20)
+        val eventList = mutableListOf<EventInfo>()
+        for (i in 0 until eventsJson.length()) {
+            try {
+                val eventStr = eventsJson.getString(i)
+                val eventJson = JSONObject(eventStr)
+                val time = eventJson.getString("time").substring(11, 19)
+                val eventObject = eventJson.getJSONObject("event")
+                val eventType = eventObject.keys().next() // 获取事件类型，如 "PeerConnAdded"
+
+                val (message, level) = when (eventType) {
+                    "PeerConnAdded" -> {
+                        val conn = eventObject.getJSONObject("PeerConnAdded")
+                        val peerId = conn.getLong("peer_id").toString().takeLast(4)
+                        val remoteAddr = conn.getJSONObject("tunnel").getJSONObject("remote_addr").getString("url")
+                        "节点($peerId)已连接: $remoteAddr" to EventInfo.Level.SUCCESS
+                    }
+                    "PeerAdded" -> {
+                        val peerId = eventObject.getLong("PeerAdded").toString().takeLast(4)
+                        "发现新节点($peerId)" to EventInfo.Level.INFO
+                    }
+                    "ConnectionAccepted" -> {
+                        val arr = eventObject.getJSONArray("ConnectionAccepted")
+                        "接受连接: ${arr.getString(1)}" to EventInfo.Level.SUCCESS
+                    }
+                    "ConnectionError" -> {
+                        val arr = eventObject.getJSONArray("ConnectionError")
+                        "连接错误: ${arr.getString(2)}" to EventInfo.Level.ERROR
+                    }
+                    "ListenerAdded" -> {
+                        "开始监听: ${eventObject.getString("ListenerAdded")}" to EventInfo.Level.INFO
+                    }
+                    "Connecting" -> {
+                        "正在连接: ${eventObject.getString("Connecting")}" to EventInfo.Level.INFO
+                    }
+                    "TunDeviceReady" -> {
+                        "虚拟网卡已就绪" to EventInfo.Level.SUCCESS
+                    }
+                    "DhcpIpv4Changed" -> {
+                        val arr = eventObject.getJSONArray("DhcpIpv4Changed")
+                        val newIp = arr.optString(1, "N/A")
+                        "DHCP IP 变更 -> $newIp" to EventInfo.Level.INFO
+                    }
+                    else -> {
+                        // 对于未知的事件类型，使用旧的简单显示方式
+                        eventObject.toString().replace("\"", "").replace(":", ": ") to EventInfo.Level.INFO
+                    }
+                }
+                eventList.add(EventInfo(time, message, level))
+            } catch (e: Exception) {
+                // 解析单条日志失败不应影响整体
+                continue
+            }
+        }
+        return eventList.takeLast(50) // 可以适当增加日志显示数量
     }
 
     private fun parseRoutes(routesJson: org.json.JSONArray): Map<Long, RouteData> {
@@ -199,7 +246,17 @@ data class MyNodeInfo(
     val interfaceIps: List<String>
 )
 
-data class EventInfo(val time: String, val message: String)
+data class EventInfo(
+    val time: String,
+    val message: String,
+    val level: Level
+){
+    enum class Level {
+        INFO,
+        SUCCESS,
+        ERROR
+    }
+}
 
 data class RouteData(
     val peerId: Long,
