@@ -1,5 +1,7 @@
 package com.easytier.jni
 
+import android.util.Log
+import androidx.annotation.Keep
 import org.json.JSONObject
 import kotlin.math.log10
 import kotlin.math.pow
@@ -12,21 +14,23 @@ import kotlin.math.pow
 object NetworkInfoParser {
 
     // --- 公共入口函数 ---
+
     /**
-     * 主解析函数，将完整的JSON字符串转换为我们定义的数据结构。
+     * 主解析函数，用于解析完整的网络快照。
      * @param jsonString 从JNI获取的原始JSON字符串。
      * @param instanceName 当前运行的实例名称。
      * @return 一个包含所有解析信息的 DetailedNetworkInfo 对象。
-     * @throws org.json.JSONException 如果JSON格式有问题或缺少关键字段。
      */
     fun parse(jsonString: String, instanceName: String): DetailedNetworkInfo {
         val root = JSONObject(jsonString)
         val instance = root.getJSONObject("map").getJSONObject(instanceName)
 
         val myNode = parseMyNodeInfo(instance.getJSONObject("my_node_info"))
-        val events = parseEvents(instance.getJSONArray("events"))
         val routesMap = parseRoutes(instance.getJSONArray("routes"))
         val peersMap = parsePeers(instance.getJSONArray("peers"))
+
+        // 主解析函数只负责解析“快照”中的事件，用于“状态”页的预览
+        val snapshotEvents = parseEventList(instance.getJSONArray("events"))
 
         val finalPeerList = mutableListOf<FinalPeerInfo>()
         routesMap.values.forEach { route ->
@@ -35,18 +39,11 @@ object NetworkInfoParser {
                 // --- 情况A: 直连节点 ---
                 finalPeerList.add(
                     FinalPeerInfo(
-                        hostname = route.hostname,
-                        virtualIp = route.virtualIp,
-                        isDirectConnection = true,
-                        connectionDetails = peerConn.physicalAddr,
-                        latency = "${peerConn.latencyUs / 1000} ms",
+                        hostname = route.hostname, virtualIp = route.virtualIp, isDirectConnection = true,
+                        connectionDetails = peerConn.physicalAddr, latency = "${peerConn.latencyUs / 1000} ms",
                         traffic = "${formatBytes(peerConn.rxBytes)} / ${formatBytes(peerConn.txBytes)}",
-                        version = route.version,
-                        natType = route.natType,
-                        routeCost = route.cost,
-                        nextHopPeerId = route.nextHopPeerId,
-                        peerId = route.peerId,
-                        instId = route.instId
+                        version = route.version, natType = route.natType, routeCost = route.cost,
+                        nextHopPeerId = route.nextHopPeerId, peerId = route.peerId, instId = route.instId
                     )
                 )
             } else {
@@ -54,18 +51,10 @@ object NetworkInfoParser {
                 val nextHopHostname = routesMap[route.nextHopPeerId]?.hostname ?: "未知"
                 finalPeerList.add(
                     FinalPeerInfo(
-                        hostname = route.hostname,
-                        virtualIp = route.virtualIp,
-                        isDirectConnection = false,
-                        connectionDetails = "通过 $nextHopHostname",
-                        latency = "${route.pathLatency} ms (路径)",
-                        traffic = "N/A",
-                        version = route.version,
-                        natType = route.natType,
-                        routeCost = route.cost,
-                        nextHopPeerId = route.nextHopPeerId,
-                        peerId = route.peerId,
-                        instId = route.instId
+                        hostname = route.hostname, virtualIp = route.virtualIp, isDirectConnection = false,
+                        connectionDetails = "通过 $nextHopHostname", latency = "${route.pathLatency} ms (路径)",
+                        traffic = "N/A", version = route.version, natType = route.natType, routeCost = route.cost,
+                        nextHopPeerId = route.nextHopPeerId, peerId = route.peerId, instId = route.instId
                     )
                 )
             }
@@ -73,9 +62,24 @@ object NetworkInfoParser {
 
         return DetailedNetworkInfo(
             myNode = myNode,
-            events = events,
+            events = snapshotEvents, // `events` 字段现在只包含快照中的事件
             finalPeerList = finalPeerList.sortedBy { it.hostname }
         )
+    }
+
+    /**
+     * 专门用于增量日志收集的函数。
+     * 它从完整的JSON快照中提取并解析所有事件。
+     */
+    fun extractAndParseEvents(jsonString: String, instanceName: String): List<EventInfo> {
+        return try {
+            val root = JSONObject(jsonString)
+            val instance = root.getJSONObject("map").getJSONObject(instanceName)
+            parseEventList(instance.getJSONArray("events"))
+        } catch (e: Exception) {
+            Log.e("NetworkInfoParser", "Failed to extract event list from JSON", e)
+            emptyList()
+        }
     }
 
     // --- 私有解析函数 ---
@@ -83,10 +87,16 @@ object NetworkInfoParser {
     private fun parseMyNodeInfo(myNodeJson: JSONObject): MyNodeInfo {
         val myStunInfoJson = myNodeJson.getJSONObject("stun_info")
         val ipsJson = myNodeJson.getJSONObject("ips")
-        val virtualIpv4Json = myNodeJson.getJSONObject("virtual_ipv4")
-        val virtualIpAddr = parseIntegerToIp(virtualIpv4Json.getJSONObject("address").getInt("addr"))
-        val virtualIpPrefix = virtualIpv4Json.getInt("network_length")
-        val virtualIp = "$virtualIpAddr/$virtualIpPrefix"
+
+        val virtualIpv4Json = myNodeJson.optJSONObject("virtual_ipv4")
+        val virtualIp = if (virtualIpv4Json != null) {
+            val virtualIpAddr = parseIntegerToIp(virtualIpv4Json.getJSONObject("address").getInt("addr"))
+            val virtualIpPrefix = virtualIpv4Json.getInt("network_length")
+            "$virtualIpAddr/$virtualIpPrefix"
+        } else {
+            "正在获取中..." // 或者 "N/A", "未分配"
+        }
+
         val listenersArray = myNodeJson.getJSONArray("listeners")
         val listenersList = (0 until listenersArray.length()).map { listenersArray.getJSONObject(it).getString("url") }
         val interfaceIpsArray = ipsJson.getJSONArray("interface_ipv4s")
@@ -107,62 +117,75 @@ object NetworkInfoParser {
         )
     }
 
-    private fun parseEvents(eventsJson: org.json.JSONArray): List<EventInfo> {
+    /**
+     * 唯一的、用于解析事件列表的函数。
+     * 它可以被 `parse` 和 `extractAndParseEvents` 共同调用。
+     */
+    private fun parseEventList(eventsJson: org.json.JSONArray): List<EventInfo> {
         val eventList = mutableListOf<EventInfo>()
-        for (i in 0 until eventsJson.length()) {
+        // 将 JSONArray 转换为 List<String> 并反转，从最旧的事件开始处理
+        val rawEventStrings = (0 until eventsJson.length()).map { eventsJson.getString(it) }.reversed()
+
+        for (eventStr in rawEventStrings) {
             try {
-                val eventStr = eventsJson.getString(i)
                 val eventJson = JSONObject(eventStr)
-                val time = eventJson.getString("time").substring(11, 19)
+                val rawTime = eventJson.getString("time")
+                val time = rawTime.substring(11, 19)
                 val eventObject = eventJson.getJSONObject("event")
-                val eventType = eventObject.keys().next() // 获取事件类型，如 "PeerConnAdded"
+                val eventType = eventObject.keys().next()
 
                 val (message, level) = when (eventType) {
                     "PeerConnAdded" -> {
                         val conn = eventObject.getJSONObject("PeerConnAdded")
                         val peerId = conn.getLong("peer_id").toString().takeLast(4)
+                        val tunnelType = conn.getJSONObject("tunnel").getString("tunnel_type").uppercase()
                         val remoteAddr = conn.getJSONObject("tunnel").getJSONObject("remote_addr").getString("url")
-                        "节点($peerId)已连接: $remoteAddr" to EventInfo.Level.SUCCESS
+                        "[$tunnelType] 节点($peerId)已连接: $remoteAddr" to EventInfo.Level.SUCCESS
+                    }
+                    "PeerConnRemoved" -> {
+                        val conn = eventObject.getJSONObject("PeerConnRemoved")
+                        val peerId = conn.getLong("peer_id").toString().takeLast(4)
+                        "节点($peerId)连接已断开" to EventInfo.Level.WARNING
                     }
                     "PeerAdded" -> {
                         val peerId = eventObject.getLong("PeerAdded").toString().takeLast(4)
                         "发现新节点($peerId)" to EventInfo.Level.INFO
                     }
+                    "PeerRemoved" -> {
+                            val peerId = eventObject.getLong("PeerRemoved").toString().takeLast(4)
+                            "节点($peerId)已移除" to EventInfo.Level.WARNING
+                        }
                     "ConnectionAccepted" -> {
                         val arr = eventObject.getJSONArray("ConnectionAccepted")
-                        "接受连接: ${arr.getString(1)}" to EventInfo.Level.SUCCESS
+                        "接受来自 ${arr.getString(1)} 的连接" to EventInfo.Level.SUCCESS
                     }
                     "ConnectionError" -> {
                         val arr = eventObject.getJSONArray("ConnectionError")
                         "连接错误: ${arr.getString(2)}" to EventInfo.Level.ERROR
                     }
-                    "ListenerAdded" -> {
-                        "开始监听: ${eventObject.getString("ListenerAdded")}" to EventInfo.Level.INFO
-                    }
-                    "Connecting" -> {
-                        "正在连接: ${eventObject.getString("Connecting")}" to EventInfo.Level.INFO
-                    }
-                    "TunDeviceReady" -> {
-                        "虚拟网卡已就绪" to EventInfo.Level.SUCCESS
-                    }
+                    "ListenerAdded" -> "开始监听: ${eventObject.getString("ListenerAdded")}" to EventInfo.Level.INFO
+                    "Connecting" -> "正在连接: ${eventObject.getString("Connecting")}" to EventInfo.Level.INFO
+                    "TunDeviceReady" -> "虚拟网卡已就绪" to EventInfo.Level.SUCCESS
                     "DhcpIpv4Changed" -> {
                         val arr = eventObject.getJSONArray("DhcpIpv4Changed")
+                        val oldIp = arr.optString(0, "无")
                         val newIp = arr.optString(1, "N/A")
-                        "DHCP IP 变更 -> $newIp" to EventInfo.Level.INFO
+                        "DHCP IP 变更: $oldIp -> $newIp" to EventInfo.Level.INFO
                     }
                     else -> {
-                        // 对于未知的事件类型，使用旧的简单显示方式
-                        eventObject.toString().replace("\"", "").replace(":", ": ") to EventInfo.Level.INFO
+                        val content = eventObject.get(eventType).toString()
+                        "$eventType: $content" to EventInfo.Level.INFO
                     }
                 }
-                eventList.add(EventInfo(time, message, level))
+                eventList.add(EventInfo(time, message, level, rawTime))
             } catch (e: Exception) {
-                // 解析单条日志失败不应影响整体
+                Log.e("NetworkInfoParser", "Failed to parse a single event string: $eventStr", e)
                 continue
             }
         }
-        return eventList.takeLast(50) // 可以适当增加日志显示数量
+        return eventList
     }
+
 
     private fun parseRoutes(routesJson: org.json.JSONArray): Map<Long, RouteData> {
         return (0 until routesJson.length()).associate {
@@ -249,11 +272,13 @@ data class MyNodeInfo(
 data class EventInfo(
     val time: String,
     val message: String,
-    val level: Level
+    val level: Level,
+    val rawTime: String
 ){
     enum class Level {
         INFO,
         SUCCESS,
+        WARNING,
         ERROR
     }
 }

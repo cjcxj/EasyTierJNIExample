@@ -1,6 +1,5 @@
 package com.easytier.app.ui
 
-import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -53,11 +52,11 @@ fun MainScreen(
     isRunning: Boolean,
     onControlButtonClick: () -> Unit,
     detailedInfo: DetailedNetworkInfo?,
+    fullEventHistory: List<EventInfo>,
     onRefreshDetailedInfo: () -> Unit,
-    onCopyJsonClick: () -> Unit
+    onCopyJsonClick: () -> Unit,
+    onExportLogsClicked: () -> Unit
 ) {
-
-    // --- 标签页设置 ---
     val tabs = listOf(
         TabItem("控制", Icons.Default.Settings),
         TabItem("状态", Icons.Default.ShowChart),
@@ -66,11 +65,8 @@ fun MainScreen(
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val coroutineScope = rememberCoroutineScope()
 
-    // 使用 LaunchedEffect 监听 isRunning 的变化。
-    // key1 = isRunning 意味着只有当 isRunning 的值改变时，这个 Effect 才会重新执行。
     LaunchedEffect(key1 = isRunning) {
         if (isRunning) {
-            // 立即切换到“状态”标签页 (索引 1)
             pagerState.animateScrollToPage(1)
         }
     }
@@ -86,11 +82,7 @@ fun MainScreen(
             )
         }
     ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .padding(paddingValues)
-                .fillMaxSize()
-        ) {
+        Column(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
             TabRow(selectedTabIndex = pagerState.currentPage) {
                 tabs.forEachIndexed { index, tabItem ->
                     Tab(
@@ -102,32 +94,24 @@ fun MainScreen(
                 }
             }
 
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize()
-            ) { page ->
+            HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
                 when (page) {
                     0 -> ControlTab(
-                        allConfigs = allConfigs,
-                        activeConfig = activeConfig,
-                        onActiveConfigChange = onActiveConfigChange,
-                        onAddNewConfig = onAddNewConfig,
-                        onDeleteConfig = onDeleteConfig,
-                        onConfigChange = onConfigChange,
-                        isRunning = isRunning,
-                        onControlButtonClick = onControlButtonClick
+                        allConfigs = allConfigs, activeConfig = activeConfig,
+                        onActiveConfigChange = onActiveConfigChange, onAddNewConfig = onAddNewConfig,
+                        onDeleteConfig = onDeleteConfig, onConfigChange = onConfigChange,
+                        isRunning = isRunning, onControlButtonClick = onControlButtonClick
                     )
                     1 -> StatusTab(
-                        status = status,
-                        isRunning = isRunning,
-                        detailedInfo = detailedInfo,
+                        status = status, isRunning = isRunning, detailedInfo = detailedInfo,
                         onRefreshDetailedInfo = onRefreshDetailedInfo,
-                        onPeerClick = { peer ->
-                            navController.navigate(Screen.PeerDetail.createRoute(peer.peerId))
-                        },
+                        onPeerClick = { peer -> navController.navigate(Screen.PeerDetail.createRoute(peer.peerId)) },
                         onCopyJsonClick = onCopyJsonClick
                     )
-                    2 -> LogTab(detailedInfo = detailedInfo)
+                    2 -> LogTab(
+                        events = fullEventHistory,
+                        onExportClicked = onExportLogsClicked
+                    )
                 }
             }
         }
@@ -150,221 +134,124 @@ fun MainScreen(
  */
 @Composable
 fun ControlTab(
-    allConfigs: List<ConfigData>,
-    activeConfig: ConfigData,
-    onActiveConfigChange: (ConfigData) -> Unit,
-    onAddNewConfig: () -> Unit,
-    onDeleteConfig: (ConfigData) -> Unit,
-    onConfigChange: (ConfigData) -> Unit,
-    isRunning: Boolean,
-    onControlButtonClick: () -> Unit,
+    allConfigs: List<ConfigData>, activeConfig: ConfigData,
+    onActiveConfigChange: (ConfigData) -> Unit, onAddNewConfig: () -> Unit,
+    onDeleteConfig: (ConfigData) -> Unit, onConfigChange: (ConfigData) -> Unit,
+    isRunning: Boolean, onControlButtonClick: () -> Unit,
 ) {
-    // 控制下拉菜单的展开/收起状态
     var showMenu by remember { mutableStateOf(false) }
-    // 控制删除确认对话框的显示/隐藏状态
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- 顶部控制行：包含启动按钮和配置菜单 ---
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 启动/停止按钮
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Button(
                 onClick = onControlButtonClick,
                 modifier = Modifier.weight(1f),
-                enabled = activeConfig.instanceName.isNotBlank(), // 简单的验证
+                enabled = activeConfig.instanceName.isNotBlank(),// 确保实例名称不为空
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                 )
-            ) {
-                Text(if (isRunning) "停止服务" else "启动服务", fontSize = 18.sp)
-            }
+            ) { Text(if (isRunning) "停止服务" else "启动服务", fontSize = 18.sp) }
 
-            // 配置选项菜单
             Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "配置选项")
-                }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false }
-                ) {
+                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "配置选项") }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     allConfigs.forEach { config ->
                         DropdownMenuItem(
                             text = { Text(config.instanceName) },
-                            onClick = {
-                                onActiveConfigChange(config)
-                                showMenu = false
-                            },
-                            leadingIcon = {
-                                if (config.id == activeConfig.id) {
-                                    Icon(Icons.Default.Check, contentDescription = "当前选中")
-                                }
-                            }
+                            onClick = { onActiveConfigChange(config); showMenu = false },
+                            leadingIcon = { if (config.id == activeConfig.id) Icon(Icons.Default.Check, "当前选中") }
                         )
                     }
                     Divider()
-                    DropdownMenuItem(
-                        text = { Text("添加新配置") },
-                        onClick = {
-                            onAddNewConfig()
-                            showMenu = false
-                        },
-                        leadingIcon = { Icon(Icons.Default.Add, "添加") }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("删除当前配置") },
-                        onClick = {
-                            showDeleteDialog = true
-                            showMenu = false
-                        },
-                        leadingIcon = { Icon(Icons.Default.Delete, "删除") },
-                        enabled = allConfigs.size > 1
-                    )
+                    DropdownMenuItem({ Text("添加新配置") }, { onAddNewConfig(); showMenu = false }, leadingIcon = { Icon(Icons.Default.Add, "添加") })
+                    DropdownMenuItem({ Text("删除当前配置") }, { showDeleteDialog = true; showMenu = false }, leadingIcon = { Icon(Icons.Default.Delete, "删除") }, enabled = allConfigs.size > 1)
                 }
             }
         }
-
         Spacer(Modifier.height(16.dp))
-
-        // --- 可编辑的配置项 ---
-        // 用户现在可以直接在此处编辑当前激活的配置
         ConfigSection(title = "基本设置", initiallyExpanded = true) {
             ConfigTextField("主机名", activeConfig.hostname, { onConfigChange(activeConfig.copy(hostname = it)) }, enabled = !isRunning)
             ConfigTextField("实例名", activeConfig.instanceName, { onConfigChange(activeConfig.copy(instanceName = it)) }, enabled = !isRunning)
         }
-        ConfigSection(title = "网络身份") {
+        ConfigSection("网络身份") {
             ConfigTextField("网络名", activeConfig.networkName, { onConfigChange(activeConfig.copy(networkName = it)) }, enabled = !isRunning)
             ConfigTextField("网络密钥", activeConfig.networkSecret, { onConfigChange(activeConfig.copy(networkSecret = it)) }, enabled = !isRunning)
         }
-        ConfigSection(title = "IP 设置") {
-            ConfigTextField(
-                label = "虚拟 IPv4",
-                value = activeConfig.ipv4,
-                onValueChange = { onConfigChange(activeConfig.copy(ipv4 = it)) },
-                enabled = !isRunning && !activeConfig.dhcp,
-                placeholder = if (activeConfig.dhcp) "由DHCP自动分配" else "例如: 10.0.0.1/24"
-            )
-            ConfigSwitch(
-                label = "自动分配IP (DHCP)",
-                checked = activeConfig.dhcp,
-                onCheckedChange = { dhcpEnabled ->
-                    val newConfig = if (dhcpEnabled) activeConfig.copy(dhcp = true, ipv4 = "")
-                    else activeConfig.copy(dhcp = false, ipv4 = "10.0.0.1/24")
-                    onConfigChange(newConfig)
-                },
-                enabled = !isRunning
-            )
+        ConfigSection("IP 设置") {
+            ConfigTextField("虚拟 IPv4", activeConfig.ipv4, { onConfigChange(activeConfig.copy(ipv4 = it)) }, !isRunning && !activeConfig.dhcp, placeholder = if (activeConfig.dhcp) "由DHCP自动分配" else "例如: 10.0.0.1/24")
+            ConfigSwitch("自动分配IP (DHCP)", activeConfig.dhcp, { dhcpEnabled ->
+                onConfigChange(if (dhcpEnabled) activeConfig.copy(dhcp = true, ipv4 = "") else activeConfig.copy(dhcp = false, ipv4 = "10.0.0.1/24"))
+            }, !isRunning)
         }
-        ConfigSection(title = "连接设置") {
-            ConfigTextField("对等节点 (每行一个)", activeConfig.peers, { onConfigChange(activeConfig.copy(peers = it)) }, enabled = !isRunning, singleLine = false, modifier = Modifier.height(100.dp))
-            ConfigTextField("监听器 (每行一个)", activeConfig.listeners, { onConfigChange(activeConfig.copy(listeners = it)) }, enabled = !isRunning, singleLine = false, modifier = Modifier.height(120.dp))
+        ConfigSection("连接设置") {
+            ConfigTextField("对等节点 (每行一个)", activeConfig.peers, { onConfigChange(activeConfig.copy(peers = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(100.dp))
+            ConfigTextField("监听器 (每行一个)", activeConfig.listeners, { onConfigChange(activeConfig.copy(listeners = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(120.dp))
         }
-        ConfigSection(title = "功能标志") {
-            ConfigSwitch("延迟优先", activeConfig.latencyFirst, { onConfigChange(activeConfig.copy(latencyFirst = it)) }, enabled = !isRunning)
-            ConfigSwitch("私有模式", activeConfig.privateMode, { onConfigChange(activeConfig.copy(privateMode = it)) }, enabled = !isRunning)
-            ConfigSwitch("启用 KCP 代理", activeConfig.enableKcpProxy, { onConfigChange(activeConfig.copy(enableKcpProxy = it)) }, enabled = !isRunning)
-            ConfigSwitch("启用 QUIC 代理", activeConfig.enableQuicProxy, { onConfigChange(activeConfig.copy(enableQuicProxy = it)) }, enabled = !isRunning)
+        ConfigSection("功能标志") {
+            ConfigSwitch("延迟优先", activeConfig.latencyFirst, { onConfigChange(activeConfig.copy(latencyFirst = it)) }, !isRunning)
+            ConfigSwitch("私有模式", activeConfig.privateMode, { onConfigChange(activeConfig.copy(privateMode = it)) }, !isRunning)
+            ConfigSwitch("启用 KCP 代理", activeConfig.enableKcpProxy, { onConfigChange(activeConfig.copy(enableKcpProxy = it)) }, !isRunning)
+            ConfigSwitch("启用 QUIC 代理", activeConfig.enableQuicProxy, { onConfigChange(activeConfig.copy(enableQuicProxy = it)) }, !isRunning)
         }
     }
 
-    // --- 删除确认对话框 ---
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
             title = { Text("确认删除") },
             text = { Text("您确定要删除配置 '${activeConfig.instanceName}' 吗？此操作无法撤销。") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onDeleteConfig(activeConfig)
-                        showDeleteDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("删除")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showDeleteDialog = false }) {
-                    Text("取消")
-                }
-            }
+            confirmButton = { Button({ onDeleteConfig(activeConfig); showDeleteDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("删除") } },
+            dismissButton = { OutlinedButton({ showDeleteDialog = false }) { Text("取消") } }
         )
     }
 }
 
-// --- 标签页2: 状态 (Status) ---
 @Composable
 fun StatusTab(
-    status: EasyTierManager.EasyTierStatus?,
-    isRunning: Boolean,
-    detailedInfo: DetailedNetworkInfo?,
-    onRefreshDetailedInfo: () -> Unit,
-    onPeerClick: (FinalPeerInfo) -> Unit,
-    onCopyJsonClick: () -> Unit
+    status: EasyTierManager.EasyTierStatus?, isRunning: Boolean, detailedInfo: DetailedNetworkInfo?,
+    onRefreshDetailedInfo: () -> Unit, onPeerClick: (FinalPeerInfo) -> Unit, onCopyJsonClick: () -> Unit
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         StatusCard(status = status, isRunning = isRunning)
-        DetailedInfoCard(
-            info = detailedInfo,
-            onRefresh = onRefreshDetailedInfo,
-            onPeerClick = onPeerClick,
-            onCopyJsonClick = onCopyJsonClick,
-            isRunning = isRunning
-        )
+        DetailedInfoCard(info = detailedInfo, onRefresh = onRefreshDetailedInfo, onPeerClick = onPeerClick, onCopyJsonClick = onCopyJsonClick, isRunning = isRunning)
     }
 }
 
-// --- 标签页3: 日志 (Log) ---
 @Composable
-fun LogTab(detailedInfo: DetailedNetworkInfo?) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        if (detailedInfo == null || detailedInfo.events.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("服务运行时将显示事件日志。")
+fun LogTab(events: List<EventInfo>, onExportClicked: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("事件日志", style = MaterialTheme.typography.titleLarge)
+            OutlinedButton(onClick = onExportClicked, enabled = events.isNotEmpty()) {
+                Icon(Icons.Default.Save, "导出", modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                Text("导出原始日志")
             }
+        }
+        Spacer(Modifier.height(8.dp))
+        if (events.isEmpty()) {
+            Box(Modifier.fillMaxSize(), Alignment.Center) { Text("服务运行时将显示事件日志。") }
         } else {
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black, RoundedCornerShape(8.dp)) // 使用纯黑背景更像终端
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                reverseLayout = true // 最新的日志在底部，并自动滚动到底部
+                modifier = Modifier.fillMaxSize().background(Color.Black, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
+                reverseLayout = true
             ) {
-                items(detailedInfo.events) { event ->
-                    // 根据日志级别选择颜色
+                items(events) { event ->
                     val logColor = when (event.level) {
-                        EventInfo.Level.SUCCESS -> Color(0xFF81C784) // 绿色
-                        EventInfo.Level.ERROR -> Color(0xFFE57373)   // 红色
-                        EventInfo.Level.INFO -> Color.White          // 白色
+                        EventInfo.Level.SUCCESS -> Color(0xFF81C784); EventInfo.Level.ERROR -> Color(0xFFE57373)
+                        EventInfo.Level.WARNING -> Color(0xFFFFD54F); EventInfo.Level.INFO -> Color.White
                     }
                     Text(
-                        text = "[${event.time}] ${event.message}",
-                        color = logColor,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        modifier = Modifier.padding(vertical = 2.dp)
+                        "[${event.time}] ${event.message}", color = logColor, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 11.sp, lineHeight = 14.sp, modifier = Modifier.padding(vertical = 2.dp)
                     )
                 }
             }

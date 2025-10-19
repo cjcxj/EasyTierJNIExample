@@ -2,6 +2,7 @@ package com.easytier.app
 
 import android.app.Activity
 import android.app.Application
+import android.net.Uri
 import android.net.VpnService
 import android.os.Bundle
 import android.util.Log
@@ -25,6 +26,12 @@ import com.easytier.app.ui.MainScreen
 import com.easytier.app.ui.MainViewModel
 import com.easytier.app.ui.PeerDetailScreen
 import kotlinx.coroutines.flow.collectLatest
+import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 // 【导航路由常量】
 sealed class Screen(val route: String) {
@@ -58,6 +65,37 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+    // 用于“创建文档”的 ActivityResultLauncher
+    private val createFileLauncher =
+        registerForActivityResult(CreateDocument("application/json")) { uri: Uri? ->
+            uri?.let { fileUri ->
+                lifecycleScope.launch {
+                    val rawEventsJson = viewModel.getRawEventsJsonForExport()
+                    if (rawEventsJson != null) {
+                        viewModel.writeContentToUri(fileUri, rawEventsJson)
+                    } else {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "没有可导出的原始事件",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        Toast.makeText(
+                            this@MainActivity,
+                            "没有可导出的事件日志",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }
+        }
+
+    // 用于从UI层触发文件创建流程
+    fun launchCreateLogFile() {
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val fileName = "easytier_events_$timeStamp.json"
+        createFileLauncher.launch(fileName)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -81,6 +119,7 @@ class MainActivity : ComponentActivity() {
                 val activeConfig by viewModel.activeConfig
                 val status by viewModel.statusState // `status` -> `statusState`
                 val detailedInfo by viewModel.detailedInfoState // `detailedInfo` -> `detailedInfoState`
+                val fullEventHistory by viewModel.fullEventHistory
                 val isRunning = viewModel.isRunning // 直接从 ViewModel 的 getter 属性获取
 
                 NavHost(navController = navController, startDestination = Screen.Main.route) {
@@ -100,8 +139,10 @@ class MainActivity : ComponentActivity() {
                                 viewModel.handleControlButtonClick(this@MainActivity)
                             },
                             detailedInfo = detailedInfo,
+                            fullEventHistory = fullEventHistory,
                             onRefreshDetailedInfo = { viewModel.manualRefreshDetailedInfo() },
-                            onCopyJsonClick = viewModel::copyJsonToClipboard
+                            onCopyJsonClick = viewModel::copyJsonToClipboard,
+                            onExportLogsClicked = ::launchCreateLogFile,
                         )
                     }
 
@@ -120,7 +161,7 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navController.popBackStack() }
                             )
                         } else {
-                            // Can show a loading or error UI here
+                            //可以在此处显示加载或错误UI
                         }
                     }
                 }
