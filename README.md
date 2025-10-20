@@ -1,4 +1,5 @@
 # EasyTier for Android 控制面板
+![Built with Gemini](https://img.shields.io/badge/AI%20Assistant-Gemini-blue)
 
 这是一个基于 [easytier-android-jni](https://github.com/EasyTier/EasyTier/tree/main/easytier-contrib/easytier-android-jni) 库构建的 Android 控制面板应用。它提供了一个现代化的、使用 Jetpack Compose 构建的用户界面，用于管理和监控 [EasyTier](https://github.com/EasyTier/EasyTier)的网络连接。
 
