@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.IOException
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -172,8 +173,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startEasyTier(activity: ComponentActivity) {
-        if (isRunning) return
+        if (isRunning) {
+            Log.w(TAG, "EasyTier is already running.")
+            return
+        }
+
         val configToml = generateTomlConfig(_activeConfig.value)
+        Log.d(TAG, "Generated Config:\n$configToml")
+
+        val timeStamp = java.time.OffsetDateTime.now().toString()
+
+
+        val tomlLogEntry = JSONObject()
+            .put("time", timeStamp)
+            .put("event", JSONObject().put("GeneratedTomlConfig", "\n--- 使用的TOML配置 ---\n$configToml\n-----------------------------"))
+            .toString()
+
+        _fullRawEventHistory.value = listOf(tomlLogEntry)
+        _fullEventHistory.value = emptyList()
+
         easyTierManager = EasyTierManager(
             activity = activity,
             instanceName = _activeConfig.value.instanceName,
@@ -342,32 +360,85 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // --- 工具函数 ---
 
     private fun generateTomlConfig(data: ConfigData): String {
-        val listenersFormatted = data.listeners.lines().filter { it.isNotBlank() }.joinToString(separator = ",\n    ") { "\"$it\"" }
-        val peersFormatted = data.peers.lines().filter { it.isNotBlank() }.joinToString(separator = "\n") { "[[peer]]\nuri = \"$it\"" }
-        val ipv4ConfigLine = if (data.ipv4.isNotBlank() && !data.dhcp) "ipv4 = \"${data.ipv4}\"" else ""
+        val sb = StringBuilder()
 
-        return """
-            hostname = "${data.hostname}"
-            instance_name = "${data.instanceName}"
-            instance_id = "53dccdcf-9f9b-4062-a62c-8ec97f3bac0e"
-            $ipv4ConfigLine
-            dhcp = ${data.dhcp}
-            listeners = [
-                $listenersFormatted
-            ]
-            rpc_portal = "${data.rpcPortal}"
+        // --- 1. 顶级键值对 (Top-level key-value pairs) ---
+        sb.appendLine("hostname = \"${data.hostname}\"")
+        sb.appendLine("instance_name = \"${data.instanceName}\"")
+        sb.appendLine("instance_id = \"${data.id}\"")
 
-            [network_identity]
-            network_name = "${data.networkName}"
-            network_secret = "${data.networkSecret}"
+        // IP 配置 (DHCP 优先)
+        if (data.dhcp) {
+            sb.appendLine("dhcp = true")
+        } else if (data.ipv4.isNotBlank()) {
+            sb.appendLine("ipv4 = \"${data.ipv4}\"")
+            sb.appendLine("dhcp = false")
+        } else {
+            sb.appendLine("dhcp = false")
+        }
 
-            $peersFormatted
+        // 其他可选的顶级参数
+        if (data.ipv6.isNotBlank()) sb.appendLine("ipv6 = \"${data.ipv6}\"")
+        if (data.mtu.isNotBlank()) sb.appendLine("mtu = ${data.mtu}")
+        if (data.encryptionAlgorithm.isNotBlank()) sb.appendLine("encryption_algorithm = \"${data.encryptionAlgorithm}\"")
 
-            [flags]
-            enable_kcp_proxy = ${data.enableKcpProxy}
-            enable_quic_proxy = ${data.enableQuicProxy}
-            latency_first = ${data.latencyFirst}
-            private_mode = ${data.privateMode}
-        """.trimIndent()
+        // 列表类型参数
+        val listenersFormatted = data.listeners.lines().filter { it.isNotBlank() }.joinToString(", ") { "\"$it\"" }
+        sb.appendLine("listeners = [$listenersFormatted]")
+
+        if (data.stunServers.isNotBlank()) {
+            val stunServersFormatted = data.stunServers.lines().filter { it.isNotBlank() }.joinToString(", ") { "\"$it\"" }
+            sb.appendLine("stun_servers = [$stunServersFormatted]")
+        }
+
+        // rpc_portal 总是需要
+        sb.appendLine("rpc_portal = \"0.0.0.0:0\"")
+
+        // --- 2. [network_identity] 表格 ---
+        sb.appendLine() // 添加一个空行进行分隔
+        sb.appendLine("[network_identity]")
+        sb.appendLine("network_name = \"${data.networkName}\"")
+        sb.appendLine("network_secret = \"${data.networkSecret}\"")
+
+        // --- 3. [[peer]] 表格数组 ---
+        // 只有在有 peers 时才添加
+        val peersList = data.peers.lines().filter { it.isNotBlank() }
+        if (peersList.isNotEmpty()) {
+            peersList.forEach { uri ->
+                sb.appendLine()
+                sb.appendLine("[[peer]]")
+                sb.appendLine("uri = \"$uri\"")
+            }
+        }
+
+        // --- 4. [flags] 表格 ---
+        val defaultFlags = mapOf(
+            "no_tun" to false, "enable_exit_node" to false, "accept_dns" to false,
+            "latency_first" to false, "enable_kcp_proxy" to false, "enable_quic_proxy" to false,
+            "disable_encryption" to false, "multi_thread" to true, "private_mode" to false,
+            "disable_udp_hole_punching" to false, "disable_sym_hole_punching" to false
+        )
+        val currentFlags = mapOf(
+            "no_tun" to data.noTun, "enable_exit_node" to data.enableExitNode, "accept_dns" to data.acceptDns,
+            "latency_first" to data.latencyFirst, "enable_kcp_proxy" to data.enableKcpProxy,
+            "enable_quic_proxy" to data.enableQuicProxy, "disable_encryption" to data.disableEncryption,
+            "multi_thread" to data.multiThread, "private_mode" to data.privateMode,
+            "disable_udp_hole_punching" to data.disableUdpHolePunching,
+            "disable_sym_hole_punching" to data.disableSymHolePunching
+        )
+
+        // 比较并只保留与默认值不同的flag
+        val flagLines = currentFlags.mapNotNull { (key, value) ->
+            if (defaultFlags[key] != value) "$key = $value" else null
+        }
+
+        // 只有当有需要输出的flag时，才生成 [flags] 段落
+        if (flagLines.isNotEmpty()) {
+            sb.appendLine()
+            sb.appendLine("[flags]")
+            flagLines.forEach { sb.appendLine(it) }
+        }
+
+        return sb.toString()
     }
 }

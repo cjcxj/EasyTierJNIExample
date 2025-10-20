@@ -84,7 +84,9 @@ fun MainScreen(
             )
         }
     ) { paddingValues ->
-        Column(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
+        Column(modifier = Modifier
+            .padding(paddingValues)
+            .fillMaxSize()) {
             TabRow(selectedTabIndex = pagerState.currentPage) {
                 tabs.forEachIndexed { index, tabItem ->
                     Tab(
@@ -136,19 +138,30 @@ fun MainScreen(
  */
 @Composable
 fun ControlTab(
-    allConfigs: List<ConfigData>, activeConfig: ConfigData,
-    onActiveConfigChange: (ConfigData) -> Unit, onAddNewConfig: () -> Unit,
-    onDeleteConfig: (ConfigData) -> Unit, onConfigChange: (ConfigData) -> Unit,
-    isRunning: Boolean, onControlButtonClick: () -> Unit,
+    allConfigs: List<ConfigData>,
+    activeConfig: ConfigData,
+    onActiveConfigChange: (ConfigData) -> Unit,
+    onAddNewConfig: () -> Unit,
+    onDeleteConfig: (ConfigData) -> Unit,
+    onConfigChange: (ConfigData) -> Unit,
+    isRunning: Boolean,
+    onControlButtonClick: () -> Unit,
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        // --- Top Control Row ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Button(
                 onClick = onControlButtonClick,
                 modifier = Modifier.weight(1f),
@@ -159,50 +172,227 @@ fun ControlTab(
             ) { Text(if (isRunning) "停止服务" else "启动服务", fontSize = 18.sp) }
 
             Box {
-                IconButton(
-                    onClick = { showMenu = true },
-                    enabled = !isRunning,
-                ) {
-                    Icon(Icons.Default.MoreVert, "配置选项")
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        "配置选项"
+                    )
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     allConfigs.forEach { config ->
                         DropdownMenuItem(
                             text = { Text(config.instanceName) },
                             onClick = { onActiveConfigChange(config); showMenu = false },
-                            leadingIcon = { if (config.id == activeConfig.id) Icon(Icons.Default.Check, "当前选中") }
+                            leadingIcon = {
+                                if (config.id == activeConfig.id) Icon(
+                                    Icons.Default.Check,
+                                    "当前选中"
+                                )
+                            }
                         )
                     }
                     Divider()
-                    DropdownMenuItem({ Text("添加新配置") }, { onAddNewConfig(); showMenu = false }, leadingIcon = { Icon(Icons.Default.Add, "添加") })
-                    DropdownMenuItem({ Text("删除当前配置") }, { showDeleteDialog = true; showMenu = false }, leadingIcon = { Icon(Icons.Default.Delete, "删除") }, enabled = allConfigs.size > 1)
+                    DropdownMenuItem(
+                        { Text("添加新配置") },
+                        { onAddNewConfig(); showMenu = false },
+                        leadingIcon = { Icon(Icons.Default.Add, "添加") })
+                    DropdownMenuItem(
+                        { Text("删除当前配置") },
+                        { showDeleteDialog = true; showMenu = false },
+                        leadingIcon = { Icon(Icons.Default.Delete, "删除") },
+                        enabled = allConfigs.size > 1
+                    )
                 }
             }
         }
         Spacer(Modifier.height(16.dp))
-        ConfigSection(title = "基本设置", initiallyExpanded = true) {
-            ConfigTextField("主机名", activeConfig.hostname, { onConfigChange(activeConfig.copy(hostname = it)) }, enabled = !isRunning)
-            ConfigTextField("实例名", activeConfig.instanceName, { onConfigChange(activeConfig.copy(instanceName = it)) }, enabled = !isRunning)
+
+        // --- Editable Config Sections ---
+        ConfigSection(title = "基本信息", initiallyExpanded = true) {
+            ConfigTextField(
+                "实例名",
+                activeConfig.instanceName,
+                { onConfigChange(activeConfig.copy(instanceName = it)) },
+                enabled = !isRunning
+            )
+            ConfigTextField(
+                "主机名",
+                activeConfig.hostname,
+                { onConfigChange(activeConfig.copy(hostname = it)) },
+                enabled = !isRunning
+            )
         }
-        ConfigSection("网络身份") {
-            ConfigTextField("网络名", activeConfig.networkName, { onConfigChange(activeConfig.copy(networkName = it)) }, enabled = !isRunning)
-            ConfigTextField("网络密钥", activeConfig.networkSecret, { onConfigChange(activeConfig.copy(networkSecret = it)) }, enabled = !isRunning)
+        ConfigSection(title = "网络身份") {
+            ConfigTextField(
+                "网络名",
+                activeConfig.networkName,
+                { onConfigChange(activeConfig.copy(networkName = it)) },
+                enabled = !isRunning
+            )
+            ConfigTextField(
+                "网络密钥",
+                activeConfig.networkSecret,
+                { onConfigChange(activeConfig.copy(networkSecret = it)) },
+                enabled = !isRunning
+            )
         }
-        ConfigSection("IP 设置") {
-            ConfigTextField("虚拟 IPv4", activeConfig.ipv4, { onConfigChange(activeConfig.copy(ipv4 = it)) }, !isRunning && !activeConfig.dhcp, placeholder = if (activeConfig.dhcp) "由DHCP自动分配" else "例如: 10.0.0.1/24")
-            ConfigSwitch("自动分配IP (DHCP)", activeConfig.dhcp, { dhcpEnabled ->
-                onConfigChange(if (dhcpEnabled) activeConfig.copy(dhcp = true, ipv4 = "") else activeConfig.copy(dhcp = false, ipv4 = "10.0.0.1/24"))
-            }, !isRunning)
+        ConfigSection(title = "IP 与接口") {
+            ConfigTextField(
+                "虚拟 IPv4",
+                activeConfig.ipv4,
+                { onConfigChange(activeConfig.copy(ipv4 = it)) },
+                !isRunning && !activeConfig.dhcp,
+                placeholder = "例如: 10.0.0.1/24"
+            )
+            ConfigSwitch(
+                "自动分配IP (DHCP)",
+                activeConfig.dhcp,
+                {
+                    onConfigChange(
+                        if (it) activeConfig.copy(
+                            dhcp = true,
+                            ipv4 = ""
+                        ) else activeConfig.copy(dhcp = false, ipv4 = "10.0.0.1/24")
+                    )
+                },
+                !isRunning
+            )
+            ConfigTextField(
+                "虚拟 IPv6",
+                activeConfig.ipv6,
+                { onConfigChange(activeConfig.copy(ipv6 = it)) },
+                !isRunning,
+                placeholder = "例如: fd00::1/64"
+            )
+            ConfigTextField(
+                "MTU",
+                activeConfig.mtu,
+                { onConfigChange(activeConfig.copy(mtu = it)) },
+                !isRunning,
+                placeholder = "默认: 1380"
+            )
+            ConfigSwitch(
+                "不创建TUN设备 (no-tun)",
+                activeConfig.noTun,
+                { onConfigChange(activeConfig.copy(noTun = it)) },
+                !isRunning
+            )
         }
-        ConfigSection("连接设置") {
-            ConfigTextField("对等节点 (每行一个)", activeConfig.peers, { onConfigChange(activeConfig.copy(peers = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(100.dp))
-            ConfigTextField("监听器 (每行一个)", activeConfig.listeners, { onConfigChange(activeConfig.copy(listeners = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(120.dp))
+        ConfigSection(title = "连接") {
+            ConfigTextField(
+                "对等节点 (peers)",
+                activeConfig.peers,
+                { onConfigChange(activeConfig.copy(peers = it)) },
+                !isRunning,
+                singleLine = false,
+                modifier = Modifier.height(100.dp)
+            )
+            ConfigTextField(
+                "监听器 (listeners)",
+                activeConfig.listeners,
+                { onConfigChange(activeConfig.copy(listeners = it)) },
+                !isRunning,
+                singleLine = false,
+                modifier = Modifier.height(100.dp)
+            )
+            ConfigTextField(
+                "STUN 服务器",
+                activeConfig.stunServers,
+                { onConfigChange(activeConfig.copy(stunServers = it)) },
+                !isRunning,
+                singleLine = false,
+                modifier = Modifier.height(80.dp),
+                placeholder = "每行一个"
+            )
         }
-        ConfigSection("功能标志") {
-            ConfigSwitch("延迟优先", activeConfig.latencyFirst, { onConfigChange(activeConfig.copy(latencyFirst = it)) }, !isRunning)
-            ConfigSwitch("私有模式", activeConfig.privateMode, { onConfigChange(activeConfig.copy(privateMode = it)) }, !isRunning)
-            ConfigSwitch("启用 KCP 代理", activeConfig.enableKcpProxy, { onConfigChange(activeConfig.copy(enableKcpProxy = it)) }, !isRunning)
-            ConfigSwitch("启用 QUIC 代理", activeConfig.enableQuicProxy, { onConfigChange(activeConfig.copy(enableQuicProxy = it)) }, !isRunning)
+        ConfigSection(title = "高级路由") {
+            ConfigTextField(
+                "代理网络",
+                activeConfig.proxyNetworks,
+                { onConfigChange(activeConfig.copy(proxyNetworks = it)) },
+                !isRunning,
+                singleLine = false,
+                modifier = Modifier.height(80.dp),
+                placeholder = "例如: 192.168.1.0/24"
+            )
+            ConfigTextField(
+                "出口节点",
+                activeConfig.exitNodes,
+                { onConfigChange(activeConfig.copy(exitNodes = it)) },
+                !isRunning,
+                singleLine = false,
+                modifier = Modifier.height(80.dp),
+                placeholder = "例如: 10.0.0.1"
+            )
+            ConfigSwitch(
+                "允许作为出口节点",
+                activeConfig.enableExitNode,
+                { onConfigChange(activeConfig.copy(enableExitNode = it)) },
+                !isRunning
+            )
+            ConfigSwitch(
+                "启用魔法DNS",
+                activeConfig.acceptDns,
+                { onConfigChange(activeConfig.copy(acceptDns = it)) },
+                !isRunning
+            )
+        }
+        ConfigSection(title = "性能与安全") {
+            ConfigSwitch(
+                "延迟优先",
+                activeConfig.latencyFirst,
+                { onConfigChange(activeConfig.copy(latencyFirst = it)) },
+                !isRunning
+            )
+            ConfigSwitch(
+                "启用 KCP 代理",
+                activeConfig.enableKcpProxy,
+                { onConfigChange(activeConfig.copy(enableKcpProxy = it)) },
+                !isRunning
+            )
+            ConfigSwitch(
+                "启用 QUIC 代理",
+                activeConfig.enableQuicProxy,
+                { onConfigChange(activeConfig.copy(enableQuicProxy = it)) },
+                !isRunning
+            )
+            ConfigSwitch(
+                "使用多线程",
+                activeConfig.multiThread,
+                { onConfigChange(activeConfig.copy(multiThread = it)) },
+                !isRunning
+            )
+            ConfigSwitch(
+                "私有模式",
+                activeConfig.privateMode,
+                { onConfigChange(activeConfig.copy(privateMode = it)) },
+                !isRunning
+            )
+            ConfigSwitch(
+                "禁用加密",
+                activeConfig.disableEncryption,
+                { onConfigChange(activeConfig.copy(disableEncryption = it)) },
+                !isRunning
+            )
+            ConfigSwitch(
+                "禁用UDP打洞",
+                activeConfig.disableUdpHolePunching,
+                { onConfigChange(activeConfig.copy(disableUdpHolePunching = it)) },
+                !isRunning
+            )
+            ConfigSwitch(
+                "禁用对称NAT打洞",
+                activeConfig.disableSymHolePunching,
+                { onConfigChange(activeConfig.copy(disableSymHolePunching = it)) },
+                !isRunning
+            )
+            ConfigTextField(
+                "加密算法",
+                activeConfig.encryptionAlgorithm,
+                { onConfigChange(activeConfig.copy(encryptionAlgorithm = it)) },
+                !isRunning,
+                placeholder = "默认: aes-gcm"
+            )
         }
     }
 
@@ -211,19 +401,28 @@ fun ControlTab(
             onDismissRequest = { showDeleteDialog = false },
             title = { Text("确认删除") },
             text = { Text("您确定要删除配置 '${activeConfig.instanceName}' 吗？此操作无法撤销。") },
-            confirmButton = { Button({ onDeleteConfig(activeConfig); showDeleteDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("删除") } },
+            confirmButton = {
+                Button(
+                    { onDeleteConfig(activeConfig); showDeleteDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("删除") }
+            },
             dismissButton = { OutlinedButton({ showDeleteDialog = false }) { Text("取消") } }
         )
     }
 }
 
+// 状态
 @Composable
 fun StatusTab(
     status: EasyTierManager.EasyTierStatus?, isRunning: Boolean, detailedInfo: DetailedNetworkInfo?,
     onRefreshDetailedInfo: () -> Unit, onPeerClick: (FinalPeerInfo) -> Unit, onCopyJsonClick: () -> Unit
 ) {
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -232,16 +431,13 @@ fun StatusTab(
     }
 }
 
+// 日志
 @Composable
 fun LogTab(rawEvents: List<String>, onExportClicked: () -> Unit) {
 
-    // 使用 remember 和 derivedStateOf 进行按需解析，以优化性能
     val parsedEvents by remember(rawEvents) {
         derivedStateOf {
-            // 只有当 rawEvents 列表实例变化时，才会重新执行这里的解析代码
-            rawEvents.mapNotNull { eventString ->
-                NetworkInfoParser.parseSingleRawEvent(eventString)
-            }
+            rawEvents.mapNotNull { NetworkInfoParser.parseSingleRawEvent(it) }
         }
     }
 
@@ -251,7 +447,7 @@ fun LogTab(rawEvents: List<String>, onExportClicked: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("事件日志", style = MaterialTheme.typography.titleLarge)
+            Text("日志 & 配置", style = MaterialTheme.typography.titleLarge)
             OutlinedButton(onClick = onExportClicked, enabled = parsedEvents.isNotEmpty()) {
                 Icon(Icons.Default.Save, "导出", modifier = Modifier.size(ButtonDefaults.IconSize))
                 Spacer(Modifier.width(ButtonDefaults.IconSpacing))
@@ -262,16 +458,14 @@ fun LogTab(rawEvents: List<String>, onExportClicked: () -> Unit) {
         Spacer(Modifier.height(8.dp))
 
         if (parsedEvents.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("服务运行时将显示事件日志。")
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("服务运行时将在此处显示配置和事件日志。")
             }
         } else {
             val lazyListState = rememberLazyListState()
             LaunchedEffect(parsedEvents.size) {
                 if (parsedEvents.isNotEmpty()) {
+                    // 自动滚动到最新的日志 (视觉上的底部)
                     lazyListState.animateScrollToItem(0)
                 }
             }
@@ -289,16 +483,26 @@ fun LogTab(rawEvents: List<String>, onExportClicked: () -> Unit) {
                     key = { it.rawTime }
                 ) { event ->
                     val logColor = when (event.level) {
-                        EventInfo.Level.SUCCESS -> Color(0xFF00FF0A)
-                        EventInfo.Level.ERROR -> Color(0xFFFF0000)
-                        EventInfo.Level.WARNING -> Color(0xFFFFC400)
+                        EventInfo.Level.SUCCESS -> Color(0xFF81C784)
+                        EventInfo.Level.ERROR -> Color(0xFFE57373)
+                        EventInfo.Level.WARNING -> Color(0xFFFFD54F)
                         EventInfo.Level.INFO -> Color.White
+                        EventInfo.Level.CONFIG -> Color(0xFF80DEEA) // 青色
                     }
+
+                    val fontSize = if (event.level == EventInfo.Level.CONFIG) 10.sp else 11.sp
+
+                    val logText = if (event.level == EventInfo.Level.CONFIG) {
+                        event.message
+                    } else {
+                        "[${event.time}] ${event.message}"
+                    }
+
                     Text(
-                        "[${event.time}] ${event.message}",
+                        text = logText,
                         color = logColor,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        fontSize = 11.sp,
+                        fontSize = fontSize,
                         lineHeight = 14.sp,
                         modifier = Modifier.padding(vertical = 2.dp)
                     )

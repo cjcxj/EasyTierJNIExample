@@ -183,6 +183,11 @@ object NetworkInfoParser {
             val eventType = eventObject.keys().next()
 
             val (message, level) = when (eventType) {
+                "GeneratedTomlConfig" -> {
+                    val tomlContent = eventObject.getString("GeneratedTomlConfig")
+                    tomlContent to EventInfo.Level.INFO
+                }
+
                 "PeerConnAdded" -> {
                     val conn = eventObject.getJSONObject("PeerConnAdded")
                     val peerId = conn.getLong("peer_id").toString().takeLast(4)
@@ -284,7 +289,7 @@ data class MyNodeInfo(
 
 @Keep
 data class EventInfo(val time: String, val message: String, val level: Level, val rawTime: String) {
-    enum class Level { INFO, SUCCESS, WARNING, ERROR }
+    enum class Level { INFO, SUCCESS, WARNING, ERROR, CONFIG }
 }
 
 @Keep
