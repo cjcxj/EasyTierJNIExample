@@ -1,0 +1,13 @@
+/.idea/
+/.gradle/
+/app/build/generated/source/wire/debug/acl/
+/app/build/generated/source/wire/debug/cli/
+/app/build/generated/source/wire/debug/tests/
+/app/build/generated/source/wire/debug/web/
+/app/build/generated/source/wire/debug/peer_rpc/
+/app/build/generated/source/wire/debug/magic_dns/
+/app/build/generated/source/wire/debug/error/
+/app/build/generated/source/wire/debug/common/
+/app/build/
+/java_pid7952.hprof
+/keystore.jks
