@@ -54,6 +54,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val detailedInfoState: State<DetailedNetworkInfo?> = _detailedInfoState
 
     private val _fullEventHistory = mutableStateOf<List<EventInfo>>(emptyList())
+
     // 只存储完整的、原始的事件JSON字符串
     private val _fullRawEventHistory = mutableStateOf<List<String>>(emptyList())
     val fullRawEventHistory: State<List<String>> = _fullRawEventHistory
@@ -84,7 +85,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val configs = settingsRepository.getAllConfigs()
         _allConfigs.value = if (configs.isEmpty()) listOf(ConfigData()) else configs
         val activeId = settingsRepository.getActiveConfigId()
-        _activeConfig.value = _allConfigs.value.find { it.id == activeId } ?: _allConfigs.value.first()
+        _activeConfig.value =
+            _allConfigs.value.find { it.id == activeId } ?: _allConfigs.value.first()
     }
 
     fun setActiveConfig(config: ConfigData) {
@@ -186,7 +188,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val tomlLogEntry = JSONObject()
             .put("time", timeStamp)
-            .put("event", JSONObject().put("GeneratedTomlConfig", "\n--- 使用的TOML配置 ---\n$configToml\n-----------------------------"))
+            .put(
+                "event",
+                JSONObject().put(
+                    "GeneratedTomlConfig",
+                    "\n--- 使用的TOML配置 ---\n$configToml\n-----------------------------"
+                )
+            )
             .toString()
 
         _fullRawEventHistory.value = listOf(tomlLogEntry)
@@ -253,7 +261,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // 1. 直接从快照中提取原始事件字符串列表
         val snapshotRawEvents = withContext(Dispatchers.Default) {
-            NetworkInfoParser.extractRawEventStrings(fullJsonString, _activeConfig.value.instanceName)
+            NetworkInfoParser.extractRawEventStrings(
+                fullJsonString,
+                _activeConfig.value.instanceName
+            )
         }
 
         if (snapshotRawEvents.isEmpty()) return
@@ -296,7 +307,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val jsonString = getRawJsonForClipboard()
             if (!jsonString.isNullOrBlank()) {
-                val clipboard = getApplication<Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clipboard =
+                    getApplication<Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clip = ClipData.newPlainText("Network Info JSON", jsonString)
                 clipboard.setPrimaryClip(clip)
                 _toastEvents.emit("JSON 已复制到剪贴板")
@@ -344,14 +356,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun writeContentToUri(uri: Uri, content: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                getApplication<Application>().contentResolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+                getApplication<Application>().contentResolver.openOutputStream(uri)
+                    ?.use { it.write(content.toByteArray()) }
                 withContext(Dispatchers.Main) {
                     Toast.makeText(getApplication(), "日志已成功导出", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: IOException) {
                 Log.e(TAG, "Failed to write logs to file", e)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(getApplication(), "导出失败: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(getApplication(), "导出失败: ${e.message}", Toast.LENGTH_LONG)
+                        .show()
                 }
             }
         }
@@ -362,83 +376,148 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun generateTomlConfig(data: ConfigData): String {
         val sb = StringBuilder()
 
-        // --- 1. 顶级键值对 (Top-level key-value pairs) ---
-        sb.appendLine("hostname = \"${data.hostname}\"")
-        sb.appendLine("instance_name = \"${data.instanceName}\"")
-        sb.appendLine("instance_id = \"${data.id}\"")
-
-        // IP 配置 (DHCP 优先)
-        if (data.dhcp) {
-            sb.appendLine("dhcp = true")
-        } else if (data.ipv4.isNotBlank()) {
-            sb.appendLine("ipv4 = \"${data.ipv4}\"")
-            sb.appendLine("dhcp = false")
-        } else {
-            sb.appendLine("dhcp = false")
+        // --- 辅助函数 ---
+        fun appendIf(condition: Boolean, text: String) {
+            if (condition) sb.appendLine(text)
         }
 
-        // 其他可选的顶级参数
-        if (data.ipv6.isNotBlank()) sb.appendLine("ipv6 = \"${data.ipv6}\"")
-        if (data.mtu.isNotBlank()) sb.appendLine("mtu = ${data.mtu}")
-        if (data.encryptionAlgorithm.isNotBlank()) sb.appendLine("encryption_algorithm = \"${data.encryptionAlgorithm}\"")
-
-        // 列表类型参数
-        val listenersFormatted = data.listeners.lines().filter { it.isNotBlank() }.joinToString(", ") { "\"$it\"" }
-        sb.appendLine("listeners = [$listenersFormatted]")
-
-        if (data.stunServers.isNotBlank()) {
-            val stunServersFormatted = data.stunServers.lines().filter { it.isNotBlank() }.joinToString(", ") { "\"$it\"" }
-            sb.appendLine("stun_servers = [$stunServersFormatted]")
+        fun appendString(key: String, value: String) {
+            if (value.isNotBlank()) sb.appendLine("$key = \"$value\"")
         }
 
-        // rpc_portal 总是需要
-        sb.appendLine("rpc_portal = \"0.0.0.0:0\"")
-
-        // --- 2. [network_identity] 表格 ---
-        sb.appendLine() // 添加一个空行进行分隔
-        sb.appendLine("[network_identity]")
-        sb.appendLine("network_name = \"${data.networkName}\"")
-        sb.appendLine("network_secret = \"${data.networkSecret}\"")
-
-        // --- 3. [[peer]] 表格数组 ---
-        // 只有在有 peers 时才添加
-        val peersList = data.peers.lines().filter { it.isNotBlank() }
-        if (peersList.isNotEmpty()) {
-            peersList.forEach { uri ->
-                sb.appendLine()
-                sb.appendLine("[[peer]]")
-                sb.appendLine("uri = \"$uri\"")
+        fun appendStringList(key: String, value: String) {
+            if (value.isNotBlank()) {
+                val formatted =
+                    value.lines().filter { it.isNotBlank() }.joinToString(", ") { "\"$it\"" }
+                sb.appendLine("$key = [$formatted]")
             }
         }
 
-        // --- 4. [flags] 表格 ---
-        val defaultFlags = mapOf(
-            "no_tun" to false, "enable_exit_node" to false, "accept_dns" to false,
-            "latency_first" to false, "enable_kcp_proxy" to false, "enable_quic_proxy" to false,
-            "disable_encryption" to false, "multi_thread" to true, "private_mode" to false,
-            "disable_udp_hole_punching" to false, "disable_sym_hole_punching" to false
-        )
-        val currentFlags = mapOf(
-            "no_tun" to data.noTun, "enable_exit_node" to data.enableExitNode, "accept_dns" to data.acceptDns,
-            "latency_first" to data.latencyFirst, "enable_kcp_proxy" to data.enableKcpProxy,
-            "enable_quic_proxy" to data.enableQuicProxy, "disable_encryption" to data.disableEncryption,
-            "multi_thread" to data.multiThread, "private_mode" to data.privateMode,
-            "disable_udp_hole_punching" to data.disableUdpHolePunching,
-            "disable_sym_hole_punching" to data.disableSymHolePunching
-        )
+        // --- 1. 顶级键值对 ---
+        appendString("hostname", data.hostname)
+        appendString("instance_name", data.instanceName)
+        sb.appendLine("instance_id = \"${data.id}\"") // 总是输出
+        if (data.dhcp) {
+            sb.appendLine("dhcp = true")
+        } else {
+            sb.appendLine("dhcp = false")
+            appendString("ipv4", data.ipv4)
+        }
+        appendStringList("listeners", data.listeners)
+        appendStringList("mapped_listeners", data.mappedListeners)
+        appendStringList("exit_nodes", data.exitNodes)
+        appendString("rpc_portal", data.rpcPortal)
+        appendStringList("rpc_portal_whitelist", data.rpcPortalWhitelist)
+        appendStringList("routes", data.routes)
+        appendString("socks5_proxy", data.socks5Proxy)
 
-        // 比较并只保留与默认值不同的flag
-        val flagLines = currentFlags.mapNotNull { (key, value) ->
-            if (defaultFlags[key] != value) "$key = $value" else null
+        // --- 2. [network_identity] ---
+        sb.appendLine("\n[network_identity]")
+        appendString("network_name", data.networkName)
+        appendString("network_secret", data.networkSecret)
+
+        // --- 3. [[peer]] ---
+        data.peers.lines().filter { it.isNotBlank() }.forEach {
+            sb.appendLine("\n[[peer]]")
+            sb.appendLine("uri = \"$it\"")
         }
 
-        // 只有当有需要输出的flag时，才生成 [flags] 段落
+        // --- 4. [[proxy_network]] ---
+        data.proxyNetworks.lines().filter { it.isNotBlank() }.forEach {
+            sb.appendLine("\n[[proxy_network]]")
+            sb.appendLine("cidr = \"$it\"")
+        }
+
+        // --- 5. [vpn_portal_config] ---
+        if (data.vpnPortalClientCidr.isNotBlank() || data.vpnPortalWgListen.isNotBlank()) {
+            sb.appendLine("\n[vpn_portal_config]")
+            appendString("client_cidr", data.vpnPortalClientCidr)
+            appendString("wireguard_listen", data.vpnPortalWgListen)
+        }
+
+        // --- 6. [[port_forward]] ---
+        data.portForwards.lines().filter { it.isNotBlank() }.forEach { line ->
+            val parts = line.split(',').map { it.trim() }
+            if (parts.size == 3) {
+                sb.appendLine("\n[[port_forward]]")
+                sb.appendLine("bind_addr = \"${parts[0]}\"")
+                sb.appendLine("dst_addr = \"${parts[1]}\"")
+                sb.appendLine("proto = \"${parts[2]}\"")
+            }
+        }
+
+        val flagLines = mutableListOf<String>()
+        val defaultFlags = ConfigData() // 获取一个包含所有默认值的实例
+
+        // --- 逐一比较并添加与默认值不同的 flag ---
+
+        // 字符串类型
+        if (data.devName.isNotBlank()) {
+            flagLines.add("dev_name = \"${data.devName}\"")
+        }
+        if (data.relayNetworkWhitelist != defaultFlags.relayNetworkWhitelist) {
+            flagLines.add("relay_network_whitelist = \"${data.relayNetworkWhitelist}\"")
+        }
+
+        // 布尔类型 (与默认值不同才输出)
+        if (data.acceptDns != defaultFlags.acceptDns) {
+            flagLines.add("accept_dns = ${data.acceptDns}")
+        }
+        if (data.disableKcpInput != defaultFlags.disableKcpInput) {
+            flagLines.add("disable_kcp_input = ${data.disableKcpInput}")
+        }
+        if (data.disableP2p != defaultFlags.disableP2p) {
+            flagLines.add("disable_p2p = ${data.disableP2p}")
+        }
+        if (data.disableQuicInput != defaultFlags.disableQuicInput) {
+            flagLines.add("disable_quic_input = ${data.disableQuicInput}")
+        }
+        if (data.disableSymHolePunching != defaultFlags.disableSymHolePunching) {
+            flagLines.add("disable_sym_hole_punching = ${data.disableSymHolePunching}")
+        }
+        if (data.disableUdpHolePunching != defaultFlags.disableUdpHolePunching) {
+            flagLines.add("disable_udp_hole_punching = ${data.disableUdpHolePunching}")
+        }
+        if (data.enableEncryption != defaultFlags.enableEncryption) {
+            flagLines.add("enable_encryption = ${data.enableEncryption}")
+        }
+        if (data.enableExitNode != defaultFlags.enableExitNode) {
+            flagLines.add("enable_exit_node = ${data.enableExitNode}")
+        }
+        if (data.enableIpv6 != defaultFlags.enableIpv6) {
+            flagLines.add("enable_ipv6 = ${data.enableIpv6}")
+        }
+        if (data.enableKcpProxy != defaultFlags.enableKcpProxy) {
+            flagLines.add("enable_kcp_proxy = ${data.enableKcpProxy}")
+        }
+        if (data.enableQuicProxy != defaultFlags.enableQuicProxy) {
+            flagLines.add("enable_quic_proxy = ${data.enableQuicProxy}")
+        }
+        if (data.latencyFirst != defaultFlags.latencyFirst) {
+            flagLines.add("latency_first = ${data.latencyFirst}")
+        }
+        if (data.noTun != defaultFlags.noTun) {
+            flagLines.add("no_tun = ${data.noTun}")
+        }
+        if (data.privateMode != defaultFlags.privateMode) {
+            flagLines.add("private_mode = ${data.privateMode}")
+        }
+        if (data.proxyForwardBySystem != defaultFlags.proxyForwardBySystem) {
+            flagLines.add("proxy_forward_by_system = ${data.proxyForwardBySystem}")
+        }
+        if (data.relayAllPeerRpc != defaultFlags.relayAllPeerRpc) {
+            flagLines.add("relay_all_peer_rpc = ${data.relayAllPeerRpc}")
+        }
+        if (data.useSmoltcp != defaultFlags.useSmoltcp) {
+            flagLines.add("use_smoltcp = ${data.useSmoltcp}")
+        }
+        // --- 只有当有需要输出的flag时，才生成 [flags] 段落 ---
         if (flagLines.isNotEmpty()) {
-            sb.appendLine()
-            sb.appendLine("[flags]")
+            sb.appendLine("\n[flags]")
             flagLines.forEach { sb.appendLine(it) }
         }
 
         return sb.toString()
     }
+
 }

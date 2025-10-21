@@ -172,7 +172,7 @@ fun ControlTab(
             ) { Text(if (isRunning) "停止服务" else "启动服务", fontSize = 18.sp) }
 
             Box {
-                IconButton(onClick = { showMenu = true }) {
+                IconButton(onClick = { showMenu = true }, enabled = !isRunning) {
                     Icon(
                         Icons.Default.MoreVert,
                         "配置选项"
@@ -209,206 +209,56 @@ fun ControlTab(
 
         // --- Editable Config Sections ---
         ConfigSection(title = "基本信息", initiallyExpanded = true) {
-            ConfigTextField(
-                "实例名",
-                activeConfig.instanceName,
-                { onConfigChange(activeConfig.copy(instanceName = it)) },
-                enabled = !isRunning
-            )
-            ConfigTextField(
-                "主机名",
-                activeConfig.hostname,
-                { onConfigChange(activeConfig.copy(hostname = it)) },
-                enabled = !isRunning
-            )
+            ConfigTextField("实例名", activeConfig.instanceName, { onConfigChange(activeConfig.copy(instanceName = it)) }, !isRunning)
+            ConfigTextField("主机名", activeConfig.hostname, { onConfigChange(activeConfig.copy(hostname = it)) }, !isRunning)
         }
         ConfigSection(title = "网络身份") {
-            ConfigTextField(
-                "网络名",
-                activeConfig.networkName,
-                { onConfigChange(activeConfig.copy(networkName = it)) },
-                enabled = !isRunning
-            )
-            ConfigTextField(
-                "网络密钥",
-                activeConfig.networkSecret,
-                { onConfigChange(activeConfig.copy(networkSecret = it)) },
-                enabled = !isRunning
-            )
+            ConfigTextField("网络名", activeConfig.networkName, { onConfigChange(activeConfig.copy(networkName = it)) }, !isRunning)
+            ConfigTextField("网络密钥", activeConfig.networkSecret, { onConfigChange(activeConfig.copy(networkSecret = it)) }, !isRunning)
         }
-        ConfigSection(title = "IP 与接口") {
-            ConfigTextField(
-                "虚拟 IPv4",
-                activeConfig.ipv4,
-                { onConfigChange(activeConfig.copy(ipv4 = it)) },
-                !isRunning && !activeConfig.dhcp,
-                placeholder = "例如: 10.0.0.1/24"
-            )
-            ConfigSwitch(
-                "自动分配IP (DHCP)",
-                activeConfig.dhcp,
-                {
-                    onConfigChange(
-                        if (it) activeConfig.copy(
-                            dhcp = true,
-                            ipv4 = ""
-                        ) else activeConfig.copy(dhcp = false, ipv4 = "10.0.0.1/24")
-                    )
-                },
-                !isRunning
-            )
-            ConfigTextField(
-                "虚拟 IPv6",
-                activeConfig.ipv6,
-                { onConfigChange(activeConfig.copy(ipv6 = it)) },
-                !isRunning,
-                placeholder = "例如: fd00::1/64"
-            )
-            ConfigTextField(
-                "MTU",
-                activeConfig.mtu,
-                { onConfigChange(activeConfig.copy(mtu = it)) },
-                !isRunning,
-                placeholder = "默认: 1380"
-            )
-            ConfigSwitch(
-                "不创建TUN设备 (no-tun)",
-                activeConfig.noTun,
-                { onConfigChange(activeConfig.copy(noTun = it)) },
-                !isRunning
-            )
+        ConfigSection(title = "IP 与连接") {
+            ConfigSwitch("DHCP", activeConfig.dhcp, { onConfigChange(activeConfig.copy(dhcp = it, ipv4 = if(it) "" else activeConfig.ipv4)) }, !isRunning)
+            ConfigTextField("IPv4", activeConfig.ipv4, { onConfigChange(activeConfig.copy(ipv4 = it)) }, !isRunning && !activeConfig.dhcp, placeholder = "例如: 10.0.0.2/24")
+            ConfigTextField("对等节点 (peers)", activeConfig.peers, { onConfigChange(activeConfig.copy(peers = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(100.dp))
+            ConfigTextField("监听器 (listeners)", activeConfig.listeners, { onConfigChange(activeConfig.copy(listeners = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(100.dp))
+            ConfigTextField("映射监听器", activeConfig.mappedListeners, { onConfigChange(activeConfig.copy(mappedListeners = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(80.dp))
         }
-        ConfigSection(title = "连接") {
-            ConfigTextField(
-                "对等节点 (peers)",
-                activeConfig.peers,
-                { onConfigChange(activeConfig.copy(peers = it)) },
-                !isRunning,
-                singleLine = false,
-                modifier = Modifier.height(100.dp)
-            )
-            ConfigTextField(
-                "监听器 (listeners)",
-                activeConfig.listeners,
-                { onConfigChange(activeConfig.copy(listeners = it)) },
-                !isRunning,
-                singleLine = false,
-                modifier = Modifier.height(100.dp)
-            )
-            ConfigTextField(
-                "STUN 服务器",
-                activeConfig.stunServers,
-                { onConfigChange(activeConfig.copy(stunServers = it)) },
-                !isRunning,
-                singleLine = false,
-                modifier = Modifier.height(80.dp),
-                placeholder = "每行一个"
-            )
+        ConfigSection(title = "高级路由与服务") {
+            ConfigTextField("代理网络 (proxy_network)", activeConfig.proxyNetworks, { onConfigChange(activeConfig.copy(proxyNetworks = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(80.dp), placeholder = "每行一个CIDR")
+            ConfigTextField("手动路由 (routes)", activeConfig.routes, { onConfigChange(activeConfig.copy(routes = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(80.dp))
+            ConfigTextField("出口节点 (exit_nodes)", activeConfig.exitNodes, { onConfigChange(activeConfig.copy(exitNodes = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(80.dp))
+            ConfigTextField("SOCKS5 代理", activeConfig.socks5Proxy, { onConfigChange(activeConfig.copy(socks5Proxy = it)) }, !isRunning, placeholder = "例如: socks5://0.0.0.0:1080")
+            ConfigTextField("RPC 门户", activeConfig.rpcPortal, { onConfigChange(activeConfig.copy(rpcPortal = it)) }, !isRunning)
+            ConfigTextField("RPC 白名单", activeConfig.rpcPortalWhitelist, { onConfigChange(activeConfig.copy(rpcPortalWhitelist = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(80.dp))
         }
-        ConfigSection(title = "高级路由") {
-            ConfigTextField(
-                "代理网络",
-                activeConfig.proxyNetworks,
-                { onConfigChange(activeConfig.copy(proxyNetworks = it)) },
-                !isRunning,
-                singleLine = false,
-                modifier = Modifier.height(80.dp),
-                placeholder = "例如: 192.168.1.0/24"
-            )
-            ConfigTextField(
-                "出口节点",
-                activeConfig.exitNodes,
-                { onConfigChange(activeConfig.copy(exitNodes = it)) },
-                !isRunning,
-                singleLine = false,
-                modifier = Modifier.height(80.dp),
-                placeholder = "例如: 10.0.0.1"
-            )
-            ConfigSwitch(
-                "允许作为出口节点",
-                activeConfig.enableExitNode,
-                { onConfigChange(activeConfig.copy(enableExitNode = it)) },
-                !isRunning
-            )
-            ConfigSwitch(
-                "启用魔法DNS",
-                activeConfig.acceptDns,
-                { onConfigChange(activeConfig.copy(acceptDns = it)) },
-                !isRunning
-            )
+        ConfigSection(title = "VPN 门户") {
+            ConfigTextField("客户端网段", activeConfig.vpnPortalClientCidr, { onConfigChange(activeConfig.copy(vpnPortalClientCidr = it)) }, !isRunning)
+            ConfigTextField("WireGuard 监听", activeConfig.vpnPortalWgListen, { onConfigChange(activeConfig.copy(vpnPortalWgListen = it)) }, !isRunning)
         }
-        ConfigSection(title = "性能与安全") {
-            ConfigSwitch(
-                "延迟优先",
-                activeConfig.latencyFirst,
-                { onConfigChange(activeConfig.copy(latencyFirst = it)) },
-                !isRunning
-            )
-            ConfigSwitch(
-                "启用 KCP 代理",
-                activeConfig.enableKcpProxy,
-                { onConfigChange(activeConfig.copy(enableKcpProxy = it)) },
-                !isRunning
-            )
-            ConfigSwitch(
-                "启用 QUIC 代理",
-                activeConfig.enableQuicProxy,
-                { onConfigChange(activeConfig.copy(enableQuicProxy = it)) },
-                !isRunning
-            )
-            ConfigSwitch(
-                "使用多线程",
-                activeConfig.multiThread,
-                { onConfigChange(activeConfig.copy(multiThread = it)) },
-                !isRunning
-            )
-            ConfigSwitch(
-                "私有模式",
-                activeConfig.privateMode,
-                { onConfigChange(activeConfig.copy(privateMode = it)) },
-                !isRunning
-            )
-            ConfigSwitch(
-                "禁用加密",
-                activeConfig.disableEncryption,
-                { onConfigChange(activeConfig.copy(disableEncryption = it)) },
-                !isRunning
-            )
-            ConfigSwitch(
-                "禁用UDP打洞",
-                activeConfig.disableUdpHolePunching,
-                { onConfigChange(activeConfig.copy(disableUdpHolePunching = it)) },
-                !isRunning
-            )
-            ConfigSwitch(
-                "禁用对称NAT打洞",
-                activeConfig.disableSymHolePunching,
-                { onConfigChange(activeConfig.copy(disableSymHolePunching = it)) },
-                !isRunning
-            )
-            ConfigTextField(
-                "加密算法",
-                activeConfig.encryptionAlgorithm,
-                { onConfigChange(activeConfig.copy(encryptionAlgorithm = it)) },
-                !isRunning,
-                placeholder = "默认: aes-gcm"
-            )
+        ConfigSection(title = "端口转发") {
+            ConfigTextField("转发规则", activeConfig.portForwards, { onConfigChange(activeConfig.copy(portForwards = it)) }, !isRunning, singleLine = false, modifier = Modifier.height(100.dp), placeholder = "bind,dst,proto (每行一条)")
         }
-    }
-
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("确认删除") },
-            text = { Text("您确定要删除配置 '${activeConfig.instanceName}' 吗？此操作无法撤销。") },
-            confirmButton = {
-                Button(
-                    { onDeleteConfig(activeConfig); showDeleteDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) { Text("删除") }
-            },
-            dismissButton = { OutlinedButton({ showDeleteDialog = false }) { Text("取消") } }
-        )
+        ConfigSection(title = "功能标志 (Flags)") {
+            ConfigTextField("TUN设备名 (dev_name)", activeConfig.devName, { onConfigChange(activeConfig.copy(devName = it)) }, !isRunning)
+            ConfigTextField("转发白名单", activeConfig.relayNetworkWhitelist, { onConfigChange(activeConfig.copy(relayNetworkWhitelist = it)) }, !isRunning)
+            ConfigSwitch("魔法DNS", activeConfig.acceptDns, { onConfigChange(activeConfig.copy(acceptDns = it)) }, !isRunning)
+            ConfigSwitch("禁用KCP输入", activeConfig.disableKcpInput, { onConfigChange(activeConfig.copy(disableKcpInput = it)) }, !isRunning)
+            ConfigSwitch("禁用P2P", activeConfig.disableP2p, { onConfigChange(activeConfig.copy(disableP2p = it)) }, !isRunning)
+            ConfigSwitch("禁用QUIC输入", activeConfig.disableQuicInput, { onConfigChange(activeConfig.copy(disableQuicInput = it)) }, !isRunning)
+            ConfigSwitch("禁用对称NAT打洞", activeConfig.disableSymHolePunching, { onConfigChange(activeConfig.copy(disableSymHolePunching = it)) }, !isRunning)
+            ConfigSwitch("禁用UDP打洞", activeConfig.disableUdpHolePunching, { onConfigChange(activeConfig.copy(disableUdpHolePunching = it)) }, !isRunning)
+            ConfigSwitch("启用加密", activeConfig.enableEncryption, { onConfigChange(activeConfig.copy(enableEncryption = it)) }, !isRunning)
+            ConfigSwitch("允许作为出口节点", activeConfig.enableExitNode, { onConfigChange(activeConfig.copy(enableExitNode = it)) }, !isRunning)
+            ConfigSwitch("启用IPv6", activeConfig.enableIpv6, { onConfigChange(activeConfig.copy(enableIpv6 = it)) }, !isRunning)
+            ConfigSwitch("启用KCP代理", activeConfig.enableKcpProxy, { onConfigChange(activeConfig.copy(enableKcpProxy = it)) }, !isRunning)
+            ConfigSwitch("启用QUIC代理", activeConfig.enableQuicProxy, { onConfigChange(activeConfig.copy(enableQuicProxy = it)) }, !isRunning)
+            ConfigSwitch("延迟优先", activeConfig.latencyFirst, { onConfigChange(activeConfig.copy(latencyFirst = it)) }, !isRunning)
+            ConfigSwitch("不创建TUN", activeConfig.noTun, { onConfigChange(activeConfig.copy(noTun = it)) }, !isRunning)
+            ConfigSwitch("私有模式", activeConfig.privateMode, { onConfigChange(activeConfig.copy(privateMode = it)) }, !isRunning)
+            ConfigSwitch("系统内核转发", activeConfig.proxyForwardBySystem, { onConfigChange(activeConfig.copy(proxyForwardBySystem = it)) }, !isRunning)
+            ConfigSwitch("转发所有RPC", activeConfig.relayAllPeerRpc, { onConfigChange(activeConfig.copy(relayAllPeerRpc = it)) }, !isRunning)
+            ConfigSwitch("使用SmolTCP", activeConfig.useSmoltcp, { onConfigChange(activeConfig.copy(useSmoltcp = it)) }, !isRunning)
+        }
     }
 }
 
