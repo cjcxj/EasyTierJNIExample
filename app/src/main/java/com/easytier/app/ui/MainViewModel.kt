@@ -380,138 +380,108 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         fun appendIf(condition: Boolean, text: String) {
             if (condition) sb.appendLine(text)
         }
-
         fun appendString(key: String, value: String) {
             if (value.isNotBlank()) sb.appendLine("$key = \"$value\"")
         }
-
         fun appendStringList(key: String, value: String) {
             if (value.isNotBlank()) {
-                val formatted =
-                    value.lines().filter { it.isNotBlank() }.joinToString(", ") { "\"$it\"" }
-                sb.appendLine("$key = [$formatted]")
+                val formatted = value.lines().filter { it.isNotBlank() }.joinToString(", ") { "\"$it\"" }
+                if (formatted.isNotEmpty()) {
+                    sb.appendLine("$key = [$formatted]")
+                }
             }
         }
 
-        // --- 1. 顶级键值对 ---
+        // --- 顶级键值对 ---
         appendString("hostname", data.hostname)
         appendString("instance_name", data.instanceName)
-        sb.appendLine("instance_id = \"${data.id}\"") // 总是输出
+        sb.appendLine("instance_id = \"${data.id}\"")
+
         if (data.dhcp) {
             sb.appendLine("dhcp = true")
         } else {
             sb.appendLine("dhcp = false")
-            appendString("ipv4", data.ipv4)
+            if (data.virtualIpv4.isNotBlank()) {
+                sb.appendLine("ipv4 = \"${data.virtualIpv4}/${data.networkLength}\"")
+            }
         }
-        appendStringList("listeners", data.listeners)
+
+        appendStringList("listeners", data.listenerUrls)
         appendStringList("mapped_listeners", data.mappedListeners)
         appendStringList("exit_nodes", data.exitNodes)
         appendString("rpc_portal", data.rpcPortal)
         appendStringList("rpc_portal_whitelist", data.rpcPortalWhitelist)
         appendStringList("routes", data.routes)
-        appendString("socks5_proxy", data.socks5Proxy)
 
-        // --- 2. [network_identity] ---
+        if (data.enableSocks5) {
+            sb.appendLine("socks5_proxy = \"socks5://0.0.0.0:${data.socks5Port}\"")
+        }
+
+        // --- [network_identity] ---
         sb.appendLine("\n[network_identity]")
         appendString("network_name", data.networkName)
         appendString("network_secret", data.networkSecret)
 
-        // --- 3. [[peer]] ---
+        // --- [[peer]] ---
         data.peers.lines().filter { it.isNotBlank() }.forEach {
             sb.appendLine("\n[[peer]]")
             sb.appendLine("uri = \"$it\"")
         }
 
-        // --- 4. [[proxy_network]] ---
         data.proxyNetworks.lines().filter { it.isNotBlank() }.forEach {
             sb.appendLine("\n[[proxy_network]]")
             sb.appendLine("cidr = \"$it\"")
         }
 
-        // --- 5. [vpn_portal_config] ---
-        if (data.vpnPortalClientCidr.isNotBlank() || data.vpnPortalWgListen.isNotBlank()) {
+        // --- [vpn_portal_config] ---
+        if (data.enableVpnPortal) {
             sb.appendLine("\n[vpn_portal_config]")
-            appendString("client_cidr", data.vpnPortalClientCidr)
-            appendString("wireguard_listen", data.vpnPortalWgListen)
+            sb.appendLine("client_cidr = \"${data.vpnPortalClientNetworkAddr}/${data.vpnPortalClientNetworkLen}\"")
+            sb.appendLine("wireguard_listen = \"0.0.0.0:${data.vpnPortalListenPort}\"")
         }
 
-        // --- 6. [[port_forward]] ---
-        data.portForwards.lines().filter { it.isNotBlank() }.forEach { line ->
-            val parts = line.split(',').map { it.trim() }
-            if (parts.size == 3) {
+        // --- [[port_forward]] ---
+        data.portForwards.forEach { pf ->
+            if (pf.bindPort != null && pf.dstPort != null && pf.dstIp.isNotBlank()) {
                 sb.appendLine("\n[[port_forward]]")
-                sb.appendLine("bind_addr = \"${parts[0]}\"")
-                sb.appendLine("dst_addr = \"${parts[1]}\"")
-                sb.appendLine("proto = \"${parts[2]}\"")
+                sb.appendLine("bind_addr = \"${pf.bindIp}:${pf.bindPort}\"")
+                sb.appendLine("dst_addr = \"${pf.dstIp}:${pf.dstPort}\"")
+                sb.appendLine("proto = \"${pf.proto}\"")
             }
         }
 
-        val flagLines = mutableListOf<String>()
+        // --- [flags] ---
         val defaultFlags = ConfigData() // 获取一个包含所有默认值的实例
+        val flagLines = mutableListOf<String>()
 
-        // --- 逐一比较并添加与默认值不同的 flag ---
-
-        // 字符串类型
-        if (data.devName.isNotBlank()) {
-            flagLines.add("dev_name = \"${data.devName}\"")
-        }
-        if (data.relayNetworkWhitelist != defaultFlags.relayNetworkWhitelist) {
+        // 比较并只添加与默认值不同的 flags
+        if (data.devName.isNotBlank()) flagLines.add("dev_name = \"${data.devName}\"")
+        if (data.mtu.isNotBlank()) flagLines.add("mtu = ${data.mtu}")
+        if (data.relayNetworkWhitelist != defaultFlags.relayNetworkWhitelist && data.enableRelayNetworkWhitelist) {
             flagLines.add("relay_network_whitelist = \"${data.relayNetworkWhitelist}\"")
         }
 
-        // 布尔类型 (与默认值不同才输出)
-        if (data.acceptDns != defaultFlags.acceptDns) {
-            flagLines.add("accept_dns = ${data.acceptDns}")
-        }
-        if (data.disableKcpInput != defaultFlags.disableKcpInput) {
-            flagLines.add("disable_kcp_input = ${data.disableKcpInput}")
-        }
-        if (data.disableP2p != defaultFlags.disableP2p) {
-            flagLines.add("disable_p2p = ${data.disableP2p}")
-        }
-        if (data.disableQuicInput != defaultFlags.disableQuicInput) {
-            flagLines.add("disable_quic_input = ${data.disableQuicInput}")
-        }
-        if (data.disableSymHolePunching != defaultFlags.disableSymHolePunching) {
-            flagLines.add("disable_sym_hole_punching = ${data.disableSymHolePunching}")
-        }
-        if (data.disableUdpHolePunching != defaultFlags.disableUdpHolePunching) {
-            flagLines.add("disable_udp_hole_punching = ${data.disableUdpHolePunching}")
-        }
-        if (data.enableEncryption != defaultFlags.enableEncryption) {
-            flagLines.add("enable_encryption = ${data.enableEncryption}")
-        }
-        if (data.enableExitNode != defaultFlags.enableExitNode) {
-            flagLines.add("enable_exit_node = ${data.enableExitNode}")
-        }
-        if (data.enableIpv6 != defaultFlags.enableIpv6) {
-            flagLines.add("enable_ipv6 = ${data.enableIpv6}")
-        }
-        if (data.enableKcpProxy != defaultFlags.enableKcpProxy) {
-            flagLines.add("enable_kcp_proxy = ${data.enableKcpProxy}")
-        }
-        if (data.enableQuicProxy != defaultFlags.enableQuicProxy) {
-            flagLines.add("enable_quic_proxy = ${data.enableQuicProxy}")
-        }
-        if (data.latencyFirst != defaultFlags.latencyFirst) {
-            flagLines.add("latency_first = ${data.latencyFirst}")
-        }
-        if (data.noTun != defaultFlags.noTun) {
-            flagLines.add("no_tun = ${data.noTun}")
-        }
-        if (data.privateMode != defaultFlags.privateMode) {
-            flagLines.add("private_mode = ${data.privateMode}")
-        }
-        if (data.proxyForwardBySystem != defaultFlags.proxyForwardBySystem) {
-            flagLines.add("proxy_forward_by_system = ${data.proxyForwardBySystem}")
-        }
-        if (data.relayAllPeerRpc != defaultFlags.relayAllPeerRpc) {
-            flagLines.add("relay_all_peer_rpc = ${data.relayAllPeerRpc}")
-        }
-        if (data.useSmoltcp != defaultFlags.useSmoltcp) {
-            flagLines.add("use_smoltcp = ${data.useSmoltcp}")
-        }
-        // --- 只有当有需要输出的flag时，才生成 [flags] 段落 ---
+        // Booleans
+        if (data.latencyFirst != defaultFlags.latencyFirst) flagLines.add("latency_first = ${data.latencyFirst}")
+        if (data.useSmoltcp != defaultFlags.useSmoltcp) flagLines.add("use_smoltcp = ${data.useSmoltcp}")
+        if (data.disableIpv6 != defaultFlags.disableIpv6) flagLines.add("disable_ipv6 = ${data.disableIpv6}")
+        if (data.enableKcpProxy != defaultFlags.enableKcpProxy) flagLines.add("enable_kcp_proxy = ${data.enableKcpProxy}")
+        if (data.disableKcpInput != defaultFlags.disableKcpInput) flagLines.add("disable_kcp_input = ${data.disableKcpInput}")
+        if (data.enableQuicProxy != defaultFlags.enableQuicProxy) flagLines.add("enable_quic_proxy = ${data.enableQuicProxy}")
+        if (data.disableQuicInput != defaultFlags.disableQuicInput) flagLines.add("disable_quic_input = ${data.disableQuicInput}")
+        if (data.disableP2p != defaultFlags.disableP2p) flagLines.add("disable_p2p = ${data.disableP2p}")
+        if (data.bindDevice != defaultFlags.bindDevice) flagLines.add("bind_device = ${data.bindDevice}")
+        if (data.noTun != defaultFlags.noTun) flagLines.add("no_tun = ${data.noTun}")
+        if (data.enableExitNode != defaultFlags.enableExitNode) flagLines.add("enable_exit_node = ${data.enableExitNode}")
+        if (data.relayAllPeerRpc != defaultFlags.relayAllPeerRpc) flagLines.add("relay_all_peer_rpc = ${data.relayAllPeerRpc}")
+        if (data.multiThread != defaultFlags.multiThread) flagLines.add("multi_thread = ${data.multiThread}")
+        if (data.proxyForwardBySystem != defaultFlags.proxyForwardBySystem) flagLines.add("proxy_forward_by_system = ${data.proxyForwardBySystem}")
+        if (data.disableEncryption != defaultFlags.disableEncryption) flagLines.add("disable_encryption = ${data.disableEncryption}")
+        if (data.disableUdpHolePunching != defaultFlags.disableUdpHolePunching) flagLines.add("disable_udp_hole_punching = ${data.disableUdpHolePunching}")
+        if (data.disableSymHolePunching != defaultFlags.disableSymHolePunching) flagLines.add("disable_sym_hole_punching = ${data.disableSymHolePunching}")
+        if (data.acceptDns != defaultFlags.acceptDns) flagLines.add("accept_dns = ${data.acceptDns}")
+        if (data.privateMode != defaultFlags.privateMode) flagLines.add("private_mode = ${data.privateMode}")
+
         if (flagLines.isNotEmpty()) {
             sb.appendLine("\n[flags]")
             flagLines.forEach { sb.appendLine(it) }
@@ -519,5 +489,4 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         return sb.toString()
     }
-
 }
