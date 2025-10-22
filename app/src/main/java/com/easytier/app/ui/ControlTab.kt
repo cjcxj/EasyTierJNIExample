@@ -19,6 +19,36 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.easytier.app.ConfigData
 import com.easytier.app.PortForwardItem
+import com.easytier.app.ui.common.ConfigSwitchWithInlineHelp
+
+private object HelpTexts {
+    const val RELAY_WHITELIST =
+        "仅转发白名单网络的流量，支持通配符。多个网络名用空格隔开。为空则禁用转发。例如：'*', 'def*', 'net1 net2'"
+    const val LATENCY_FIRST = "忽略中转跳数，选择总延迟最低的路径进行通信。"
+    const val PRIVATE_MODE = "启用后，不允许与本机网络名称和密码不符的节点通过本机进行握手或中转。"
+    const val ENABLE_KCP = "将 TCP 流量转为 KCP 流量，可降低延迟、提升速度。"
+    const val DISABLE_KCP_INPUT = "禁用 KCP 入站流量。其他节点将使用 TCP 连接到本节点。"
+    const val DISABLE_P2P = "禁用 P2P 模式，所有流量将通过手动指定的服务器中转。"
+    const val NO_TUN =
+        "不创建 TUN 网卡，适合无管理员权限时使用。本节点仅允许被访问，访问其他节点需使用 SOCKS5 代理。"
+    const val MULTI_THREAD = "使用多线程模式运行核心服务，可能提升性能。"
+    const val ACCEPT_DNS = "启用魔法 DNS，可通过 'hostname.et.net' 访问网络内其他节点。"
+    const val BIND_DEVICE = "仅在物理网络接口上监听和建立连接，避免通过其他 VPN 或虚拟网卡通信。"
+    const val ENABLE_EXIT_NODE = "允许此节点作为其他节点的网络出口，转发其所有流量到公共互联网。"
+    const val DISABLE_ENCRYPTION =
+        "禁用对等节点间的通信加密。警告：不安全，仅在特殊网络环境下使用，且需所有节点配置一致。"
+    const val DISABLE_IPV6 = "禁用此节点的 IPv6 功能，仅使用 IPv4 进行网络通信。"
+    const val ENABLE_QUIC = "将 TCP 流量转为 QUIC 流量，可降低延迟、提升速度。"
+    const val DISABLE_QUIC_INPUT = "禁用 QUIC 入站流量。其他节点将使用 TCP 连接到本节点。"
+    const val DISABLE_UDP_HOLE_PUNCHING = "禁用常规的 UDP 打洞尝试，可能影响 P2P 连接建立。"
+    const val DISABLE_SYM_HOLE_PUNCHING =
+        "禁用针对对称 NAT 的打洞技术（生日攻击），会将其视为更简单的锥形 NAT 处理。"
+    const val RELAY_ALL_RPC =
+        "允许转发所有对等节点的 RPC 数据包，即使它们不在转发网络白名单中。有助于白名单外的节点建立 P2P 连接。"
+    const val PROXY_FORWARD_BY_SYSTEM = "通过操作系统内核（而非内置 NAT）来转发子网代理的数据包。"
+    const val USE_SMOLTCP =
+        "使用用户态 TCP/IP 协议栈，可绕过某些操作系统防火墙限制，改善子网代理或 KCP 代理的兼容性。"
+}
 
 
 // --- 标签页1: 控制 (Control) ---
@@ -35,6 +65,7 @@ import com.easytier.app.PortForwardItem
  * @param isRunning 服务当前是否在运行。
  * @param onControlButtonClick 当主启动/停止按钮被点击时调用。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ControlTab(
     allConfigs: List<ConfigData>,
@@ -148,7 +179,10 @@ fun ControlTab(
                 },
                 enabled = !isRunning
             )
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 OutlinedTextField(
                     value = activeConfig.virtualIpv4,
                     onValueChange = { onConfigChange(activeConfig.copy(virtualIpv4 = it)) },
@@ -160,7 +194,14 @@ fun ControlTab(
                 Text("/", modifier = Modifier.padding(top = 8.dp))
                 OutlinedTextField(
                     value = activeConfig.networkLength.toString(),
-                    onValueChange = { onConfigChange(activeConfig.copy(networkLength = it.toIntOrNull()?.coerceIn(1, 32) ?: activeConfig.networkLength)) },
+                    onValueChange = {
+                        onConfigChange(
+                            activeConfig.copy(
+                                networkLength = it.toIntOrNull()?.coerceIn(1, 32)
+                                    ?: activeConfig.networkLength
+                            )
+                        )
+                    },
                     label = { Text("掩码") },
                     enabled = !isRunning && !activeConfig.dhcp,
                     modifier = Modifier.weight(1.5f),
@@ -209,21 +250,15 @@ fun ControlTab(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
             )
 
-            // No-TUN 开关
-            ConfigSwitch(
-                label = "不创建TUN设备 (no-tun)",
-                checked = activeConfig.noTun,
-                onCheckedChange = { onConfigChange(activeConfig.copy(noTun = it)) },
-                enabled = !isRunning
-            )
         }
 
         // --- 功能标志 (Flags) ---
         CollapsibleConfigSection(title = "功能标志 (Flags)") {
-            ConfigSwitch(
+            ConfigSwitchWithInlineHelp(
                 "启用转发白名单",
                 activeConfig.enableRelayNetworkWhitelist,
                 { onConfigChange(activeConfig.copy(enableRelayNetworkWhitelist = it)) },
+                HelpTexts.RELAY_WHITELIST,
                 enabled = !isRunning
             )
             ConfigTextField(
@@ -233,131 +268,151 @@ fun ControlTab(
                 enabled = !isRunning && activeConfig.enableRelayNetworkWhitelist
             )
             Spacer(Modifier.height(8.dp))
+
+            // 其他所有开关
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Column(Modifier.weight(1f)) {
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "延迟优先",
                         activeConfig.latencyFirst,
                         { onConfigChange(activeConfig.copy(latencyFirst = it)) },
-                        enabled = !isRunning
+                        HelpTexts.LATENCY_FIRST,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "私有模式",
                         activeConfig.privateMode,
                         { onConfigChange(activeConfig.copy(privateMode = it)) },
-                        enabled = !isRunning
+                        HelpTexts.PRIVATE_MODE,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "启用KCP",
                         activeConfig.enableKcpProxy,
                         { onConfigChange(activeConfig.copy(enableKcpProxy = it)) },
-                        enabled = !isRunning
+                        HelpTexts.ENABLE_KCP,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "禁用KCP输入",
                         activeConfig.disableKcpInput,
                         { onConfigChange(activeConfig.copy(disableKcpInput = it)) },
-                        enabled = !isRunning
+                        HelpTexts.DISABLE_KCP_INPUT,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "禁用P2P",
                         activeConfig.disableP2p,
                         { onConfigChange(activeConfig.copy(disableP2p = it)) },
-                        enabled = !isRunning
+                        HelpTexts.DISABLE_P2P,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "不创建TUN",
                         activeConfig.noTun,
                         { onConfigChange(activeConfig.copy(noTun = it)) },
-                        enabled = !isRunning
+                        HelpTexts.NO_TUN,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "使用多线程",
                         activeConfig.multiThread,
                         { onConfigChange(activeConfig.copy(multiThread = it)) },
-                        enabled = !isRunning
+                        HelpTexts.MULTI_THREAD,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "魔法DNS",
                         activeConfig.acceptDns,
                         { onConfigChange(activeConfig.copy(acceptDns = it)) },
-                        enabled = !isRunning
+                        HelpTexts.ACCEPT_DNS,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "绑定设备",
                         activeConfig.bindDevice,
                         { onConfigChange(activeConfig.copy(bindDevice = it)) },
-                        enabled = !isRunning
+                        HelpTexts.BIND_DEVICE,
+                        !isRunning
                     )
                 }
                 Column(Modifier.weight(1f)) {
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "允许作为出口",
                         activeConfig.enableExitNode,
                         { onConfigChange(activeConfig.copy(enableExitNode = it)) },
-                        enabled = !isRunning
+                        HelpTexts.ENABLE_EXIT_NODE,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "禁用加密",
                         activeConfig.disableEncryption,
                         { onConfigChange(activeConfig.copy(disableEncryption = it)) },
-                        enabled = !isRunning
+                        HelpTexts.DISABLE_ENCRYPTION,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "禁用IPv6",
                         activeConfig.disableIpv6,
                         { onConfigChange(activeConfig.copy(disableIpv6 = it)) },
-                        enabled = !isRunning
+                        HelpTexts.DISABLE_IPV6,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "启用QUIC",
                         activeConfig.enableQuicProxy,
                         { onConfigChange(activeConfig.copy(enableQuicProxy = it)) },
-                        enabled = !isRunning
+                        HelpTexts.ENABLE_QUIC,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "禁用QUIC输入",
                         activeConfig.disableQuicInput,
                         { onConfigChange(activeConfig.copy(disableQuicInput = it)) },
-                        enabled = !isRunning
+                        HelpTexts.DISABLE_QUIC_INPUT,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "禁用UDP打洞",
                         activeConfig.disableUdpHolePunching,
                         { onConfigChange(activeConfig.copy(disableUdpHolePunching = it)) },
-                        enabled = !isRunning
+                        HelpTexts.DISABLE_UDP_HOLE_PUNCHING,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "禁用对称NAT打洞",
                         activeConfig.disableSymHolePunching,
                         { onConfigChange(activeConfig.copy(disableSymHolePunching = it)) },
-                        enabled = !isRunning
+                        HelpTexts.DISABLE_SYM_HOLE_PUNCHING,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "转发所有RPC",
                         activeConfig.relayAllPeerRpc,
                         { onConfigChange(activeConfig.copy(relayAllPeerRpc = it)) },
-                        enabled = !isRunning
+                        HelpTexts.RELAY_ALL_RPC,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "系统内核转发",
                         activeConfig.proxyForwardBySystem,
                         { onConfigChange(activeConfig.copy(proxyForwardBySystem = it)) },
-                        enabled = !isRunning
+                        HelpTexts.PROXY_FORWARD_BY_SYSTEM,
+                        !isRunning
                     )
-                    ConfigSwitch(
+                    ConfigSwitchWithInlineHelp(
                         "使用SmolTCP",
                         activeConfig.useSmoltcp,
                         { onConfigChange(activeConfig.copy(useSmoltcp = it)) },
-                        enabled = !isRunning
+                        HelpTexts.USE_SMOLTCP,
+                        !isRunning
                     )
                 }
             }
         }
-
         // --- 高级路由配置 ---
         CollapsibleConfigSection(title = "高级路由") {
             ConfigTextField(

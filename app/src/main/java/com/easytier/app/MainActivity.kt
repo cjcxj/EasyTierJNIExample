@@ -2,6 +2,7 @@ package com.easytier.app
 
 import android.app.Activity
 import android.app.Application
+import android.graphics.Color
 import android.net.Uri
 import android.net.VpnService
 import android.os.Bundle
@@ -27,6 +28,10 @@ import com.easytier.app.ui.MainViewModel
 import com.easytier.app.ui.PeerDetailScreen
 import kotlinx.coroutines.flow.collectLatest
 import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -98,10 +103,31 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
 
             val context = LocalContext.current // 获取当前 Composable 的 Context
+
+            // 动态设置状态栏颜色和图标样式
+            val darkTheme = isSystemInDarkTheme()
+            val view = LocalView.current
+
+            // 使用 DisposableEffect，当 darkTheme 状态改变时，代码会重新执行
+            DisposableEffect(darkTheme) {
+                // 将状态栏背景设置为完全透明
+                window.statusBarColor = Color.TRANSPARENT
+
+                // 获取窗口的 InsetsController，用于控制系统栏的外观
+                val insetsController = WindowCompat.getInsetsController(window, view)
+
+                // 根据是否为深色主题，设置状态栏图标的颜色
+                // isAppearanceLightStatusBars = true -> 图标为深色（用于浅色背景）
+                // isAppearanceLightStatusBars = false -> 图标为浅色（用于深色背景）
+                insetsController.isAppearanceLightStatusBars = !darkTheme
+
+                // onDispose 用于清理副作用，这里我们不需要做什么
+                onDispose { }
+            }
 
             // 使用 LaunchedEffect 来监听 ViewModel 的事件 Flow
             LaunchedEffect(key1 = true) {
