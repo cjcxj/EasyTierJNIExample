@@ -297,49 +297,12 @@ fun ControlTab(
                         !isRunning
                     )
                     ConfigSwitchWithInlineHelp(
-                        "禁用KCP输入",
-                        activeConfig.disableKcpInput,
-                        { onConfigChange(activeConfig.copy(disableKcpInput = it)) },
-                        HelpTexts.DISABLE_KCP_INPUT,
-                        !isRunning
-                    )
-                    ConfigSwitchWithInlineHelp(
                         "禁用P2P",
                         activeConfig.disableP2p,
                         { onConfigChange(activeConfig.copy(disableP2p = it)) },
                         HelpTexts.DISABLE_P2P,
                         !isRunning
                     )
-                    ConfigSwitchWithInlineHelp(
-                        "不创建TUN",
-                        activeConfig.noTun,
-                        { onConfigChange(activeConfig.copy(noTun = it)) },
-                        HelpTexts.NO_TUN,
-                        !isRunning
-                    )
-                    ConfigSwitchWithInlineHelp(
-                        "使用多线程",
-                        activeConfig.multiThread,
-                        { onConfigChange(activeConfig.copy(multiThread = it)) },
-                        HelpTexts.MULTI_THREAD,
-                        !isRunning
-                    )
-                    ConfigSwitchWithInlineHelp(
-                        "魔法DNS",
-                        activeConfig.acceptDns,
-                        { onConfigChange(activeConfig.copy(acceptDns = it)) },
-                        HelpTexts.ACCEPT_DNS,
-                        !isRunning
-                    )
-                    ConfigSwitchWithInlineHelp(
-                        "绑定设备",
-                        activeConfig.bindDevice,
-                        { onConfigChange(activeConfig.copy(bindDevice = it)) },
-                        HelpTexts.BIND_DEVICE,
-                        !isRunning
-                    )
-                }
-                Column(Modifier.weight(1f)) {
                     ConfigSwitchWithInlineHelp(
                         "允许作为出口",
                         activeConfig.enableExitNode,
@@ -348,17 +311,10 @@ fun ControlTab(
                         !isRunning
                     )
                     ConfigSwitchWithInlineHelp(
-                        "禁用加密",
-                        activeConfig.disableEncryption,
-                        { onConfigChange(activeConfig.copy(disableEncryption = it)) },
-                        HelpTexts.DISABLE_ENCRYPTION,
-                        !isRunning
-                    )
-                    ConfigSwitchWithInlineHelp(
-                        "禁用IPv6",
-                        activeConfig.disableIpv6,
-                        { onConfigChange(activeConfig.copy(disableIpv6 = it)) },
-                        HelpTexts.DISABLE_IPV6,
+                        "禁用KCP输入",
+                        activeConfig.disableKcpInput,
+                        { onConfigChange(activeConfig.copy(disableKcpInput = it)) },
+                        HelpTexts.DISABLE_KCP_INPUT,
                         !isRunning
                     )
                     ConfigSwitchWithInlineHelp(
@@ -376,17 +332,47 @@ fun ControlTab(
                         !isRunning
                     )
                     ConfigSwitchWithInlineHelp(
+                        "使用多线程",
+                        activeConfig.multiThread,
+                        { onConfigChange(activeConfig.copy(multiThread = it)) },
+                        HelpTexts.MULTI_THREAD,
+                        !isRunning
+                    )
+                }
+                Column(Modifier.weight(1f)) {
+                    ConfigSwitchWithInlineHelp(
+                        "禁用加密",
+                        activeConfig.disableEncryption,
+                        { onConfigChange(activeConfig.copy(disableEncryption = it)) },
+                        HelpTexts.DISABLE_ENCRYPTION,
+                        !isRunning
+                    )
+                    ConfigSwitchWithInlineHelp(
+                        "禁用IPv6",
+                        activeConfig.disableIpv6,
+                        { onConfigChange(activeConfig.copy(disableIpv6 = it)) },
+                        HelpTexts.DISABLE_IPV6,
+                        !isRunning
+                    )
+                    ConfigSwitchWithInlineHelp(
+                        "魔法DNS",
+                        activeConfig.acceptDns,
+                        { onConfigChange(activeConfig.copy(acceptDns = it)) },
+                        HelpTexts.ACCEPT_DNS,
+                        !isRunning
+                    )
+                    ConfigSwitchWithInlineHelp(
+                        "绑定设备",
+                        activeConfig.bindDevice,
+                        { onConfigChange(activeConfig.copy(bindDevice = it)) },
+                        HelpTexts.BIND_DEVICE,
+                        !isRunning
+                    )
+                    ConfigSwitchWithInlineHelp(
                         "禁用UDP打洞",
                         activeConfig.disableUdpHolePunching,
                         { onConfigChange(activeConfig.copy(disableUdpHolePunching = it)) },
                         HelpTexts.DISABLE_UDP_HOLE_PUNCHING,
-                        !isRunning
-                    )
-                    ConfigSwitchWithInlineHelp(
-                        "禁用对称NAT打洞",
-                        activeConfig.disableSymHolePunching,
-                        { onConfigChange(activeConfig.copy(disableSymHolePunching = it)) },
-                        HelpTexts.DISABLE_SYM_HOLE_PUNCHING,
                         !isRunning
                     )
                     ConfigSwitchWithInlineHelp(
@@ -404,10 +390,24 @@ fun ControlTab(
                         !isRunning
                     )
                     ConfigSwitchWithInlineHelp(
+                        "禁用对称NAT打洞",
+                        activeConfig.disableSymHolePunching,
+                        { onConfigChange(activeConfig.copy(disableSymHolePunching = it)) },
+                        HelpTexts.DISABLE_SYM_HOLE_PUNCHING,
+                        !isRunning
+                    )
+                    ConfigSwitchWithInlineHelp(
                         "使用SmolTCP",
                         activeConfig.useSmoltcp,
                         { onConfigChange(activeConfig.copy(useSmoltcp = it)) },
                         HelpTexts.USE_SMOLTCP,
+                        !isRunning
+                    )
+                    ConfigSwitchWithInlineHelp(
+                        "不创建TUN",
+                        activeConfig.noTun,
+                        { onConfigChange(activeConfig.copy(noTun = it)) },
+                        HelpTexts.NO_TUN,
                         !isRunning
                     )
                 }
