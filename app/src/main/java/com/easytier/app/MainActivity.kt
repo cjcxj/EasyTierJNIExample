@@ -169,6 +169,8 @@ class MainActivity : ComponentActivity() {
                             onRefreshDetailedInfo = { viewModel.manualRefreshDetailedInfo() },
                             onCopyJsonClick = viewModel::copyJsonToClipboard,
                             onExportLogsClicked = ::launchCreateLogFile,
+                            onExportConfig = { uri -> viewModel.exportConfig(uri) },
+                            onImportConfig = { uri -> viewModel.importConfig(uri) }
                         )
                     }
 

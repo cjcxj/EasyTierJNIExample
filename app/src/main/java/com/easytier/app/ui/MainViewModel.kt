@@ -1,20 +1,30 @@
 package com.easytier.app.ui
 
 import android.app.Application
+import android.net.Uri
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.akuleshov7.ktoml.Toml
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.coroutines.launch
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.util.UUID
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.net.Uri
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import com.easytier.app.ConfigData
 import com.easytier.app.MainActivity
 import com.easytier.app.SettingsRepository
+import com.easytier.app.TomlConfig
+import com.easytier.app.toConfigData
+import com.easytier.app.toTomlConfig
 import com.easytier.jni.DetailedNetworkInfo
 import com.easytier.jni.EasyTierJNI
 import com.easytier.jni.EasyTierManager
@@ -24,8 +34,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import org.json.JSONObject
 import java.io.IOException
 
@@ -163,6 +173,94 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             settingsRepository.saveAllConfigs(newList)
         }
     }
+
+    fun exportConfig(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                // 1. 获取当前配置数据
+                val configData = activeConfig.value
+
+                // 2. 将 ConfigData 映射为 TomlConfig 并序列化
+                val tomlString = generateTomlConfig(configData)
+
+                // 3. 使用 ContentResolver 将字符串写入用户选择的文件
+                getApplication<Application>().contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    outputStream.write(tomlString.toByteArray())
+                }
+                _toastEvents.emit("配置已导出")
+            } catch (e: Exception) {
+                // 处理错误，例如显示错误消息
+                e.printStackTrace()
+            }
+        }
+    }
+
+    // 导入配置
+    fun importConfig(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                // 1. 使用 ContentResolver 读取文件内容
+                val stringBuilder = StringBuilder()
+                getApplication<Application>().contentResolver.openInputStream(uri)?.use { inputStream ->
+                    BufferedReader(InputStreamReader(inputStream)).forEachLine {
+                        stringBuilder.append(it).append("\n")
+                    }
+                }
+                val tomlString = stringBuilder.toString()
+                if (tomlString.isBlank()) {
+                    _toastEvents.emit("导入失败：文件为空或无法读取")
+                    return@launch
+                }
+
+
+                // 2. 将 TOML 字符串反序列化为 TomlConfig 对象
+                val tomlConfig = Toml.decodeFromString<TomlConfig>(tomlString)
+
+                // 3. 将 TomlConfig 对象映射回应用的 ConfigData 对象
+                var importedConfig = tomlConfig.toConfigData()
+
+                // --- 4. 集成到现有配置管理逻辑中 ---
+
+                val currentConfigs = _allConfigs.value
+                val existingIds = currentConfigs.map { it.id }
+                val existingNames = currentConfigs.map { it.instanceName }
+
+                // 检查 ID 冲突：如果导入的 ID 已存在，则生成一个新的 ID
+                if (existingIds.contains(importedConfig.id)) {
+                    importedConfig = importedConfig.copy(id = UUID.randomUUID().toString())
+                }
+
+                // 检查名称冲突：如果名称已存在，则添加后缀，类似 addNewConfig 的逻辑
+                var newName = importedConfig.instanceName
+                var counter = 2
+                while (existingNames.contains(newName)) {
+                    newName = "${importedConfig.instanceName}_$counter"
+                    counter++
+                }
+                if (newName != importedConfig.instanceName) {
+                    importedConfig = importedConfig.copy(instanceName = newName)
+                }
+
+                // 5. 将处理好的新配置添加到列表，并保存
+                val newList = currentConfigs + importedConfig
+                _allConfigs.value = newList
+                setActiveConfig(importedConfig) // 将导入的配置设为当前活动配置
+
+                settingsRepository.saveAllConfigs(newList)
+
+                // 6. 发送成功提示
+                _toastEvents.emit("配置 '${importedConfig.instanceName}' 导入成功")
+
+            } catch (e: kotlinx.serialization.SerializationException) {
+                _toastEvents.emit("导入失败：文件格式无效")
+                Log.e(TAG, "TOML parsing failed", e)
+            } catch (e: Exception) {
+                _toastEvents.emit("导入失败：发生未知错误")
+                Log.e(TAG, "Import failed", e)
+            }
+        }
+    }
+
 
     // --- 服务生命周期 ---
 
@@ -373,7 +471,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- 工具函数 ---
 
-    private fun generateTomlConfig(data: ConfigData): String {
+    private fun generateTomlConfig1(data: ConfigData): String {
         val sb = StringBuilder()
 
         // --- 辅助函数 ---
@@ -488,5 +586,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         return sb.toString()
+    }
+
+    /**
+     * 将 ConfigData 对象序列化为 TOML 格式的字符串。
+     * @param data 包含所有配置信息的 ConfigData 实例。
+     * @return 格式化好的 TOML 字符串。
+     */
+    private fun generateTomlConfig(data: ConfigData): String {
+        // 1. 将你的应用数据模型映射到可序列化的数据模型
+        val serializableConfig = data.toTomlConfig()
+
+        // 2. 使用 ktoml 库进行序列化
+        //    这里的 Toml 实例可以配置，但默认行为通常就足够了
+        return Toml.encodeToString(serializableConfig)
     }
 }

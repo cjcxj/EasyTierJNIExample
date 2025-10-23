@@ -1,5 +1,8 @@
 package com.easytier.app.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,6 +17,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,9 +52,12 @@ private object HelpTexts {
     const val PROXY_FORWARD_BY_SYSTEM = "通过操作系统内核（而非内置 NAT）来转发子网代理的数据包。"
     const val USE_SMOLTCP =
         "使用用户态 TCP/IP 协议栈，可绕过某些操作系统防火墙限制，改善子网代理或 KCP 代理的兼容性。"
-    const val MANUAL_ROUTES_HELP = "手动分配路由CIDR，将禁用子网代理和从对等节点传播的wireguard路由。例如：192.168.0.0/16"
-    const val SOCKS5_SERVER_HELP = "启用 socks5 服务器，允许 socks5 客户端访问虚拟网络. 格式: <端口>，例如：1080"
-    const val PORT_FORWARD_HELP = "将本地端口转发到虚拟网络中的远程端口。例如：udp://0.0.0.0:12345/10.126.126.1:23456，表示将本地UDP端口12345转发到虚拟网络中的10.126.126.1:23456。可以指定多个。"
+    const val MANUAL_ROUTES_HELP =
+        "手动分配路由CIDR，将禁用子网代理和从对等节点传播的wireguard路由。例如：192.168.0.0/16"
+    const val SOCKS5_SERVER_HELP =
+        "启用 socks5 服务器，允许 socks5 客户端访问虚拟网络. 格式: <端口>，例如：1080"
+    const val PORT_FORWARD_HELP =
+        "将本地端口转发到虚拟网络中的远程端口。例如：udp://0.0.0.0:12345/10.126.126.1:23456，表示将本地UDP端口12345转发到虚拟网络中的10.126.126.1:23456。可以指定多个。"
 }
 
 
@@ -79,10 +86,33 @@ fun ControlTab(
     onConfigChange: (ConfigData) -> Unit,
     isRunning: Boolean,
     onControlButtonClick: () -> Unit,
+    onExportConfig: (Uri) -> Unit,
+    onImportConfig: (Uri) -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
+    // --- 文件导出器 (创建文件) ---
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/toml"),
+        onResult = { uri: Uri? ->
+            uri?.let {
+                onExportConfig(it)
+                // 可以在 ViewModel 中处理成功提示
+            }
+        }
+    )
+
+
+    // --- 文件导入器 (打开文件) ---
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri: Uri? ->
+            uri?.let {
+                onImportConfig(it)
+            }
+        }
+    )
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -131,6 +161,28 @@ fun ControlTab(
                         { showDeleteDialog = true; showMenu = false },
                         leadingIcon = { Icon(Icons.Default.Delete, "删除") },
                         enabled = allConfigs.size > 1
+                    )
+                    Divider() // --- 分隔线，让导入导出更清晰 ---
+
+                    DropdownMenuItem(
+                        text = { Text("导入配置") },
+                        onClick = {
+                            // 启动文件选择器来打开文件
+                            importLauncher.launch(arrayOf("application/toml", "text/plain", "*/*"))
+                            showMenu = false
+                        },
+                        leadingIcon = { Icon(Icons.Default.FileOpen, "导入") }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("导出当前配置") },
+                        onClick = {
+                            // 推荐的文件名，用户可以修改
+                            val fileName = "${activeConfig.instanceName}.toml"
+                            // 启动文件选择器来创建文件
+                            exportLauncher.launch(fileName)
+                            showMenu = false
+                        },
+                        leadingIcon = { Icon(Icons.Default.IosShare, "导出") }
                     )
                 }
             }
@@ -517,7 +569,7 @@ fun ControlTab(
                     enabled = !isRunning,
                     singleLine = false,
                     modifier = Modifier.height(100.dp),
-                    placeholder = "例如: 127.0.0.1/32"
+                    placeholder = "例如: 127.0.0.1/24"
                 )
             }
         }

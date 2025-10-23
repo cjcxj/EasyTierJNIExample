@@ -2,6 +2,7 @@
 
 package com.easytier.app.ui
 
+import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,7 +45,9 @@ fun MainScreen(
     rawEventHistory: List<String>,
     onRefreshDetailedInfo: () -> Unit,
     onCopyJsonClick: () -> Unit,
-    onExportLogsClicked: () -> Unit
+    onExportLogsClicked: () -> Unit,
+    onExportConfig: (Uri) -> Unit,
+    onImportConfig: (Uri) -> Unit
 ) {
     val tabs = listOf(
         TabItem("控制", Icons.Default.Settings),
@@ -97,7 +100,9 @@ fun MainScreen(
                         onDeleteConfig = onDeleteConfig,
                         onConfigChange = onConfigChange,
                         isRunning = isRunning,
-                        onControlButtonClick = onControlButtonClick
+                        onControlButtonClick = onControlButtonClick,
+                        onExportConfig = onExportConfig,
+                        onImportConfig = onImportConfig
                     )
 
                     1 -> StatusTab(
