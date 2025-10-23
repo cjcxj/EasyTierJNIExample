@@ -1,14 +1,36 @@
-/.idea/
-/.gradle/
-/app/build/generated/source/wire/debug/acl/
-/app/build/generated/source/wire/debug/cli/
-/app/build/generated/source/wire/debug/tests/
-/app/build/generated/source/wire/debug/web/
-/app/build/generated/source/wire/debug/peer_rpc/
-/app/build/generated/source/wire/debug/magic_dns/
-/app/build/generated/source/wire/debug/error/
-/app/build/generated/source/wire/debug/common/
-/app/build/
-/java_pid7952.hprof
-/keystore.jks
-/local.properties
+# ===================================================================
+# Standard .gitignore file for Android Studio projects
+# ===================================================================
+
+# Build output
+# This single line covers /build, /app/build, /any_module/build, and all their contents
+build/
+
+# IDE files and directories
+# Using wildcards to cover .idea/ in root and any subdirectories
+.idea/
+*.iml
+.gradle/
+captures/
+.DS_Store
+
+# Local configuration files that should not be committed
+local.properties
+# Also ignore all .properties files in the root, as they might contain secrets
+# Kept separate from the rule below to be explicit
+/*.properties
+
+# Keystore files for signing. NEVER commit these.
+*.jks
+*.keystore
+
+# Google Services file (if downloaded manually)
+google-services.json
+
+# Profiler and memory dump files
+*.hprof
+*.hprof.*
+
+# ===================================================================
+# End of file
+# ===================================================================

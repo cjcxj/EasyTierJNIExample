@@ -1,23 +1,26 @@
 # gradle/libs.versions.toml
 
 [versions]
-androidGradlePlugin = "8.2.0"
-kotlin = "1.9.0"
-coreKtx = "1.12.0"
-lifecycleRuntimeKtx = "2.6.2"
-activityCompose = "1.8.1"
-composeBom = "2023.08.00"
-appcompat = "1.6.1"
-moshi = "1.15.0"
-wire = "4.9.3"
+androidGradlePlugin = "8.13.0"
+kotlin = "2.2.20"
+coreKtx = "1.17.0"
+lifecycleRuntimeKtx = "2.9.4"
+activityCompose = "1.11.0"
+composeBom = "2025.10.01"
+appcompat = "1.7.1"
+moshi = "1.15.2"
+wire = "5.4.0"
 junit = "4.13.2"
-junitVersion = "1.1.5"
-espressoCore = "3.5.1"
-constraintlayout = "2.1.4"
-datastore = "1.0.0"
-navigation = "2.7.5"
-lifecycle = "2.6.2"
-compose-material-icons = "1.6.0"
+junitVersion = "1.3.0"
+espressoCore = "3.7.0"
+constraintlayout = "2.2.1"
+datastore = "1.1.7"
+navigation = "2.9.5"
+lifecycle = "2.9.4"
+compose-material-icons = "1.7.8"
+ktoml = "0.7.1"
+kotlinx-serialization = "1.9.0"
+compose-compiler = "2.2.21"
 
 [libraries]
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
@@ -51,8 +54,13 @@ junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 
+ktoml-core = { group = "com.akuleshov7", name = "ktoml-core", version.ref = "ktoml" }
+kotlinx-serialization-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
+
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "androidGradlePlugin" }
 androidLibrary = { id = "com.android.library", version.ref = "androidGradlePlugin" }
 jetbrainsKotlinAndroid = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 wire = { id = "com.squareup.wire", version.ref = "wire" }
+kotlinxSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "compose-compiler" }
