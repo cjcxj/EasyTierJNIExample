@@ -48,6 +48,9 @@ private object HelpTexts {
     const val PROXY_FORWARD_BY_SYSTEM = "通过操作系统内核（而非内置 NAT）来转发子网代理的数据包。"
     const val USE_SMOLTCP =
         "使用用户态 TCP/IP 协议栈，可绕过某些操作系统防火墙限制，改善子网代理或 KCP 代理的兼容性。"
+    const val MANUAL_ROUTES_HELP = "手动分配路由CIDR，将禁用子网代理和从对等节点传播的wireguard路由。例如：192.168.0.0/16"
+    const val SOCKS5_SERVER_HELP = "启用 socks5 服务器，允许 socks5 客户端访问虚拟网络. 格式: <端口>，例如：1080"
+    const val PORT_FORWARD_HELP = "将本地端口转发到虚拟网络中的远程端口。例如：udp://0.0.0.0:12345/10.126.126.1:23456，表示将本地UDP端口12345转发到虚拟网络中的10.126.126.1:23456。可以指定多个。"
 }
 
 
@@ -173,7 +176,7 @@ fun ControlTab(
                 onCheckedChange = { dhcpEnabled ->
                     // 启用DHCP时清空静态IP，禁用时不做改变让用户手动输入
                     onConfigChange(
-                        if (dhcpEnabled) activeConfig.copy(dhcp = true, virtualIpv4 = "")
+                        if (dhcpEnabled) activeConfig.copy(dhcp = true)
                         else activeConfig.copy(dhcp = false)
                     )
                 },
@@ -219,7 +222,7 @@ fun ControlTab(
                 placeholder = "留空则自动获取"
             )
             ConfigTextField(
-                "监听器",
+                "监听器(每行一个)",
                 activeConfig.listenerUrls,
                 { onConfigChange(activeConfig.copy(listenerUrls = it)) },
                 enabled = !isRunning,
@@ -227,12 +230,13 @@ fun ControlTab(
                 modifier = Modifier.height(100.dp)
             )
             ConfigTextField(
-                "映射监听器",
+                "映射监听器(每行一个)",
                 activeConfig.mappedListeners,
                 { onConfigChange(activeConfig.copy(mappedListeners = it)) },
                 enabled = !isRunning,
                 singleLine = false,
-                modifier = Modifier.height(80.dp)
+                modifier = Modifier.height(100.dp),
+                placeholder = "手动指定监听器的公网地址，其他节点可以使用该地址连接到本节点。"
             )
             ConfigTextField(
                 "TUN设备名 (dev_name)",
@@ -246,7 +250,7 @@ fun ControlTab(
                 activeConfig.mtu,
                 { onConfigChange(activeConfig.copy(mtu = it)) },
                 enabled = !isRunning,
-                placeholder = "留空使用默认值",
+                placeholder = "TUN设备的MTU，默认为非加密时为1380，加密时为1360。范围：400-1380",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
             )
 
@@ -422,7 +426,7 @@ fun ControlTab(
                 enabled = !isRunning,
                 singleLine = false,
                 modifier = Modifier.height(100.dp),
-                placeholder = "每行一个CIDR"
+                placeholder = "子网代理CIDR,每行一个CIDR"
             )
             ConfigSwitch(
                 "启用自定义路由",
@@ -436,7 +440,8 @@ fun ControlTab(
                 { onConfigChange(activeConfig.copy(routes = it)) },
                 enabled = !isRunning && activeConfig.enableManualRoutes,
                 singleLine = false,
-                modifier = Modifier.height(100.dp)
+                modifier = Modifier.height(120.dp),
+                placeholder = HelpTexts.MANUAL_ROUTES_HELP
             )
             ConfigTextField(
                 "出口节点 (Exit Nodes)",
@@ -444,15 +449,17 @@ fun ControlTab(
                 { onConfigChange(activeConfig.copy(exitNodes = it)) },
                 enabled = !isRunning,
                 singleLine = false,
-                modifier = Modifier.height(80.dp)
+                modifier = Modifier.height(100.dp),
+                placeholder = "转发所有流量的出口节点，虚拟IPv4地址，优先级由列表顺序决定"
             )
         }
         // --- 服务与门户 ---
         CollapsibleConfigSection(title = "服务与门户") {
-            ConfigSwitch(
+            ConfigSwitchWithInlineHelp(
                 "启用SOCKS5代理",
                 activeConfig.enableSocks5,
                 { onConfigChange(activeConfig.copy(enableSocks5 = it)) },
+                HelpTexts.SOCKS5_SERVER_HELP,
                 enabled = !isRunning
             )
             OutlinedTextField(
@@ -517,6 +524,16 @@ fun ControlTab(
 
         // --- 端口转发配置 ---
         CollapsibleConfigSection(title = "端口转发") {
+            // 添加帮助文本说明
+            Text(
+                text = HelpTexts.PORT_FORWARD_HELP,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             // Display existing port forward rules
             activeConfig.portForwards.forEachIndexed { index, item ->
                 PortForwardRow(
