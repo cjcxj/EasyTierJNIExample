@@ -17,13 +17,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.easytier.app.ConfigData
 import com.easytier.app.PortForwardItem
-import com.easytier.app.ui.common.ConfigSwitchWithInlineHelp
+import com.easytier.app.ui.ConfigSwitchWithInlineHelp
 
 private object HelpTexts {
     const val RELAY_WHITELIST =

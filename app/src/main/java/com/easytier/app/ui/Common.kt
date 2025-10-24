@@ -1,4 +1,4 @@
-package com.easytier.app.ui.common // 新的包名
+package com.easytier.app.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable

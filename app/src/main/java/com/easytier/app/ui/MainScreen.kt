@@ -1,5 +1,3 @@
-// FILE: com/easytier/app/ui/MainScreen.kt
-
 package com.easytier.app.ui
 
 import android.net.Uri

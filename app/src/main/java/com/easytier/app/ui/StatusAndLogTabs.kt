@@ -25,7 +25,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.easytier.app.ui.common.StatusRow
+import com.easytier.app.ui.StatusRow
 import com.easytier.jni.DetailedNetworkInfo
 import com.easytier.jni.EasyTierManager
 import com.easytier.jni.EventInfo
