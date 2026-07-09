@@ -35,11 +35,20 @@ data class ConfigData(
     val socks5Port: Int = 1080,
     val exitNodes: String = "",
     val mappedListeners: String = "",
-    val rpcPortal: String = "0.0.0.0:0",
-    val rpcPortalWhitelist: String = "",
+    val ipv6: String = "",
+    val stunServers: String = "",
+    val stunServersV6: String = "",
+    val secureMode: Boolean = false,
+    val localPrivateKey: String = "",
+    val localPublicKey: String = "",
 
     // --- 端口转发 ---
     val portForwards: List<PortForwardItem> = emptyList(),
+
+    // --- IPv6 公网地址 ---
+    val ipv6PublicAddrProvider: Boolean = false,
+    val ipv6PublicAddrAuto: Boolean = false,
+    val ipv6PublicAddrPrefix: String = "",
 
     // --- Flags (布尔开关) ---
     val latencyFirst: Boolean = false,
@@ -47,10 +56,11 @@ data class ConfigData(
     val disableIpv6: Boolean = false,
     val enableKcpProxy: Boolean = false,
     val disableKcpInput: Boolean = false,
+    val disableRelayKcp: Boolean = false,
     val enableQuicProxy: Boolean = false,
     val disableQuicInput: Boolean = false,
     val disableP2p: Boolean = false,
-    val bindDevice: Boolean = false,
+    val bindDevice: Boolean = true,
     val noTun: Boolean = false,
     val enableExitNode: Boolean = false,
     val relayAllPeerRpc: Boolean = false,
@@ -60,7 +70,35 @@ data class ConfigData(
     val disableUdpHolePunching: Boolean = false,
     val disableSymHolePunching: Boolean = false,
     val acceptDns: Boolean = false,
-    val privateMode: Boolean = false
+    val privateMode: Boolean = false,
+    val p2pOnly: Boolean = false,
+    val lazyP2p: Boolean = false,
+    val needP2p: Boolean = false,
+    val disableTcpHolePunching: Boolean = false,
+    val disableRelayQuic: Boolean = false,
+    val enableRelayForeignNetworkQuic: Boolean = false,
+    val enableRelayForeignNetworkKcp: Boolean = false,
+    val disableUpnp: Boolean = false,
+    val disableRelayData: Boolean = false,
+    val enableUdpBroadcastRelay: Boolean = false,
+    val encryptionAlgorithm: String = "",
+
+    // --- 高级选项 ---
+    val dataCompressAlgo: String = "",  // ""=default, "none", "zstd"
+    val multiThreadCount: Int = 2,
+    val foreignRelayBpsLimit: String = "",
+    val instanceRecvBpsLimit: String = "",
+    val tldDnsZone: String = "",
+    val socketMark: String = "",
+    val credentialFile: String = "",
+
+    // --- 非 UI 字段 (仅用于 TOML 配置文件读写保留, 对齐上游) ---
+    val netns: String = "",
+    val acl: Acl? = null,
+    val tcpWhitelist: String = "",
+    val udpWhitelist: String = "",
+    val defaultProtocol: String = "",
+    val source: ConfigSourceConfig? = null
 )
 
 @Keep
