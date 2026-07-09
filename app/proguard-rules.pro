@@ -51,7 +51,11 @@
 
 # 1. 保留所有生成的 Enum 类
 -keep public enum acl.** { *; }
--keep public enum cli.** { *; }
+-keep public enum deprecated_cli.** { *; }
+-keep public enum api.config.** { *; }
+-keep public enum api.instance.** { *; }
+-keep public enum api.logger.** { *; }
+-keep public enum api.manage.** { *; }
 -keep public enum common.** { *; }
 -keep public enum error.** { *; }
 -keep public enum magic_dns.** { *; }
@@ -61,7 +65,11 @@
 
 # 2. 保留所有生成的非 Enum 数据模型类
 -keep class acl.** { *; }
--keep class cli.** { *; }
+-keep class deprecated_cli.** { *; }
+-keep class api.config.** { *; }
+-keep class api.instance.** { *; }
+-keep class api.logger.** { *; }
+-keep class api.manage.** { *; }
 -keep class common.** { *; }
 -keep class error.** { *; }
 -keep class magic_dns.** { *; }

@@ -27,11 +27,11 @@ android {
 
     signingConfigs {
         create("release") {
-            // 读取 gradle.properties 中的变量
-            storeFile = file("E:/programming-language/android/EasyTierJNIExample/keystore.jks") // 使用绝对或相对路径
-            storePassword = System.getenv("MY_KEYSTORE_PASSWORD") ?: property("MY_KEYSTORE_PASSWORD") as String
-            keyAlias = System.getenv("MY_KEY_ALIAS") ?: property("MY_KEY_ALIAS") as String
-            keyPassword = System.getenv("MY_KEY_PASSWORD") ?: property("MY_KEY_PASSWORD") as String
+            // 使用 project.findProperty 安全获取，如果找不到则返回空字符串或默认值
+            storePassword = project.findProperty("MY_KEYSTORE_PASSWORD")?.toString() ?: ""
+            keyPassword = project.findProperty("MY_KEY_PASSWORD")?.toString() ?: ""
+            keyAlias = project.findProperty("MY_KEY_ALIAS")?.toString() ?: ""
+            // storeFile = file("你的签名文件路径.jks")
         }
     }
 
