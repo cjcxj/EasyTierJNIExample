@@ -41,6 +41,11 @@ message FlagsInConfig {
   bool enable_quic_proxy = 24;
   // does this peer allow quic input
   bool disable_quic_input = 25;
+  // disable relay local network quic packets
+  bool disable_relay_quic = 35;
+
+  // quic listen port
+  uint32 quic_listen_port = 33 [deprecated = true];
 
   // a global relay limit, only work for foreign network
   uint64 foreign_relay_bps_limit = 26;
@@ -49,12 +54,36 @@ message FlagsInConfig {
 
   // enable relay foreign network kcp packets
   bool enable_relay_foreign_network_kcp = 28;
-  
-    // encryption algorithm to use, empty string means default (aes-gcm)
+
+  // enable relay foreign network quic packets
+  bool enable_relay_foreign_network_quic = 36;
+
+  // encryption algorithm to use, empty string means default (aes-gcm)
   string encryption_algorithm = 29;
-  
+
   // disable symmetric nat hole punching, treat symmetric as cone when enabled
   bool disable_sym_hole_punching = 30;
+
+  // tld dns zone for magic dns
+  string tld_dns_zone = 31;
+
+  bool p2p_only = 32;
+
+  bool disable_tcp_hole_punching = 34;
+
+  bool lazy_p2p = 37;
+  bool need_p2p = 38;
+  uint64 instance_recv_bps_limit = 39;
+  bool disable_upnp = 40;
+  bool disable_relay_data = 41;
+  bool enable_udp_broadcast_relay = 42;
+
+  // Linux-only: SO_MARK (fwmark) value applied to every outbound underlay
+  // socket (TCP/UDP/QUIC/WS/WG connectors and listeners). Unset = leave
+  // SO_MARK untouched (kernel default 0). Any set value (including 0) is
+  // applied via setsockopt. Requires CAP_NET_ADMIN; silently ignored on
+  // non-Linux platforms.
+  optional uint32 socket_mark = 43;
 }
 
 message RpcDescriptor {
@@ -144,6 +173,13 @@ message Ipv6Addr {
   uint32 part4 = 4;
 }
 
+message IpAddr {
+  oneof ip {
+    Ipv4Addr ipv4 = 1;
+    Ipv6Addr ipv6 = 2;
+  };
+}
+
 message Ipv4Inet {
   Ipv4Addr address = 1;
   uint32 network_length = 2;
@@ -175,6 +211,7 @@ message TunnelInfo {
   string tunnel_type = 1;
   common.Url local_addr = 2;
   common.Url remote_addr = 3;
+  common.Url resolved_remote_addr = 4;
 }
 
 message StunInfo {
@@ -191,6 +228,13 @@ message PeerFeatureFlag {
   bool avoid_relay_data = 2;
   bool kcp_input = 3;
   bool no_relay_kcp = 4;
+  bool support_conn_list_sync = 5;
+  bool quic_input = 6;
+  bool no_relay_quic = 7;
+  bool is_credential_peer = 8;
+  bool need_p2p = 9;
+  bool disable_p2p = 10;
+  bool ipv6_public_addr_provider = 11;
 }
 
 enum SocketType {
@@ -212,4 +256,14 @@ message LimiterConfig {
   optional uint64 bps = 2; // default 0 means no limit (unit is B/s)
   optional uint64 fill_duration_ms =
       3; // default 10ms, the period to fill the bucket
+}
+
+message SecureModeConfig {
+  bool enabled = 1;
+
+  // base64(X25519 private key), used by shared node to present a stable identity
+  optional string local_private_key = 2;
+
+  // base64(X25519 public key), required if local_private_key is set
+  optional string local_public_key = 3;
 }
