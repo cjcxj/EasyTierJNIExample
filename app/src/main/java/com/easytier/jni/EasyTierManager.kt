@@ -8,7 +8,7 @@ import android.util.Log
 import com.squareup.moshi.Moshi
 import com.squareup.wire.WireJsonAdapterFactory
 import common.Ipv4Inet
-import web.NetworkInstanceRunningInfoMap
+import api.manage.NetworkInstanceRunningInfoMap
 
 fun parseIpv4InetToString(inet: Ipv4Inet?): String? {
     val addr = inet?.address?.addr ?: return null

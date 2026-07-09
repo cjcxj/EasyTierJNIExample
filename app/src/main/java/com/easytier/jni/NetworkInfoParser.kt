@@ -2,6 +2,7 @@ package com.easytier.jni
 
 import android.util.Log
 import androidx.annotation.Keep
+import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.log10
 import kotlin.math.pow
@@ -9,8 +10,11 @@ import kotlin.math.pow
 /**
  * 【JSON解析工具类】
  * 负责将从EasyTier JNI获取的JSON字符串解析为结构化的Kotlin数据对象。
+ * 兼容 protobuf JSON snake_case 输出格式。
  */
 object NetworkInfoParser {
+
+    private const val TAG = "NetworkInfoParser"
 
     // --- 公共入口函数 ---
 
@@ -21,15 +25,194 @@ object NetworkInfoParser {
      * @return 一个包含所有解析信息的 DetailedNetworkInfo 对象。
      */
     fun parse(jsonString: String, instanceName: String): DetailedNetworkInfo {
-        val root = JSONObject(jsonString)
-        val instance = root.getJSONObject("map").getJSONObject(instanceName)
+        return try {
+            val root = JSONObject(jsonString)
+            val mapObj = root.optJSONObject("map")
+            if (mapObj == null) {
+                Log.w(TAG, "JSON root missing 'map' key. Keys: ${root.keys().asSequence().toList()}")
+                return DetailedNetworkInfo(myNode = null, events = emptyList(), finalPeerList = emptyList())
+            }
 
-        val myNode = parseMyNodeInfo(instance.getJSONObject("my_node_info"))
-        val routesMap = parseRoutes(instance.getJSONArray("routes"))
-        val peersMap = parsePeers(instance.getJSONArray("peers"))
-        val snapshotEvents = parseEventList(instance.getJSONArray("events"))
+            val instance = mapObj.optJSONObject(instanceName)
+            if (instance == null) {
+                Log.w(TAG, "Map missing instance '$instanceName'. Available keys: ${mapObj.keys().asSequence().toList()}")
+                return DetailedNetworkInfo(myNode = null, events = emptyList(), finalPeerList = emptyList())
+            }
 
-        val finalPeerList = routesMap.values.map { route ->
+            val myNode = parseMyNodeInfo(instance.optJSONObject("my_node_info"))
+            val routesMap = parseRoutes(instance.optJSONArray("routes"))
+            val peersMap = parsePeers(instance.optJSONArray("peers"))
+            val snapshotEvents = parseEventList(instance.optJSONArray("events"))
+
+            val finalPeerList = buildFinalPeerList(routesMap, peersMap)
+
+            DetailedNetworkInfo(
+                myNode = myNode,
+                events = snapshotEvents,
+                finalPeerList = finalPeerList.sortedBy { it.hostname }
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse network info snapshot", e)
+            DetailedNetworkInfo(myNode = null, events = emptyList(), finalPeerList = emptyList())
+        }
+    }
+
+    /**
+     * 从完整的网络快照JSON中，提取出原始的事件JSON字符串数组。
+     * 供 ViewModel 的增量日志收集逻辑调用。
+     */
+    fun extractRawEventStrings(jsonString: String, instanceName: String): List<String> {
+        return try {
+            val root = JSONObject(jsonString)
+            val instance = root.getJSONObject("map").getJSONObject(instanceName)
+            val eventsArray = instance.getJSONArray("events")
+            (0 until eventsArray.length()).map { eventsArray.getString(it) }.reversed()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to extract raw event strings", e)
+            emptyList()
+        }
+    }
+
+    // --- 私有解析函数 ---
+
+    private fun parseMyNodeInfo(myNodeJson: JSONObject?): MyNodeInfo? {
+        if (myNodeJson == null) {
+            Log.w(TAG, "my_node_info is null")
+            return null
+        }
+        return try {
+            val myStunInfoJson = myNodeJson.optJSONObject("stun_info")
+            val ipsJson = myNodeJson.optJSONObject("ips")
+            val virtualIpv4Json = myNodeJson.optJSONObject("virtual_ipv4")
+            val virtualIp = if (virtualIpv4Json != null) {
+                val addrJson = virtualIpv4Json.optJSONObject("address")
+                val addr = addrJson?.optInt("addr", 0) ?: 0
+                val netLen = virtualIpv4Json.optInt("network_length", 24)
+                "${parseIntegerToIp(addr)}/$netLen"
+            } else {
+                "正在获取中..."
+            }
+
+            val listenersList = myNodeJson.optJSONArray("listeners")?.let { arr ->
+                (0 until arr.length()).map { i ->
+                    arr.optJSONObject(i)?.optString("url", "") ?: ""
+                }.filter { it.isNotBlank() }
+            } ?: emptyList()
+
+            val interfaceIpsList = ipsJson?.optJSONArray("interface_ipv4s")?.let { arr ->
+                (0 until arr.length()).map { i ->
+                    val addr = arr.optJSONObject(i)?.optInt("addr", 0) ?: 0
+                    parseIntegerToIp(addr)
+                }
+            } ?: emptyList()
+
+            val publicIpsArray = myStunInfoJson?.optJSONArray("public_ip")
+            val publicIpsStr = if (publicIpsArray != null && publicIpsArray.length() > 0) {
+                (0 until publicIpsArray.length()).joinToString(", ") { publicIpsArray.optString(it, "") }
+            } else {
+                "N/A"
+            }
+
+            val natTypeRaw = myStunInfoJson?.opt("udp_nat_type")
+
+            MyNodeInfo(
+                hostname = myNodeJson.optString("hostname", "未知"),
+                version = myNodeJson.optString("version", ""),
+                virtualIp = virtualIp,
+                publicIp = publicIpsStr,
+                natType = parseNatType(natTypeRaw),
+                listeners = listenersList,
+                interfaceIps = interfaceIpsList
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse my_node_info", e)
+            null
+        }
+    }
+
+    private fun parseRoutes(routesJson: JSONArray?): Map<Long, RouteData> {
+        if (routesJson == null) return emptyMap()
+        return try {
+            (0 until routesJson.length()).mapNotNull { i ->
+                try {
+                    val route = routesJson.getJSONObject(i)
+                    val peerId = route.optLong("peer_id", -1)
+                    if (peerId < 0) return@mapNotNull null
+                    val ipv4AddrJson = route.optJSONObject("ipv4_addr")
+                    val virtualIp = if (ipv4AddrJson != null) {
+                        val addr = ipv4AddrJson.optJSONObject("address")?.optInt("addr", 0) ?: 0
+                        parseIntegerToIp(addr)
+                    } else "无虚拟IP"
+
+                    val stunInfoJson = route.optJSONObject("stun_info")
+                    val natTypeRaw = stunInfoJson?.opt("udp_nat_type")
+
+                    peerId to RouteData(
+                        peerId = peerId,
+                        hostname = route.optString("hostname", "未知"),
+                        virtualIp = virtualIp,
+                        nextHopPeerId = route.optLong("next_hop_peer_id", 0),
+                        pathLatency = route.optInt("path_latency", 0),
+                        cost = route.optInt("cost", 0),
+                        version = route.optString("version", ""),
+                        natType = parseNatType(natTypeRaw),
+                        instId = route.optString("inst_id", "")
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to parse route at index $i", e)
+                    null
+                }
+            }.toMap()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse routes", e)
+            emptyMap()
+        }
+    }
+
+    private fun parsePeers(peersJson: JSONArray?): Map<Long, PeerConnectionData> {
+        if (peersJson == null) return emptyMap()
+        val peersMap = mutableMapOf<Long, PeerConnectionData>()
+        try {
+            for (i in 0 until peersJson.length()) {
+                try {
+                    val peer = peersJson.getJSONObject(i)
+                    val conns = peer.optJSONArray("conns") ?: continue
+                    if (conns.length() == 0) continue
+                    val conn = conns.optJSONObject(0) ?: continue
+                    val peerId = conn.optLong("peer_id", -1)
+                    if (peerId < 0) continue
+
+                    val tunnelJson = conn.optJSONObject("tunnel")
+                    val remoteAddrJson = tunnelJson?.optJSONObject("remote_addr")
+                    val physicalAddr = remoteAddrJson?.optString("url", "未知") ?: "未知"
+
+                    val statsJson = conn.optJSONObject("stats")
+                    val latencyUs = statsJson?.optLong("latency_us", 0) ?: 0
+                    val rxBytes = statsJson?.optLong("rx_bytes", 0) ?: 0
+                    val txBytes = statsJson?.optLong("tx_bytes", 0) ?: 0
+
+                    peersMap[peerId] = PeerConnectionData(
+                        peerId = peerId,
+                        physicalAddr = physicalAddr,
+                        latencyUs = latencyUs,
+                        rxBytes = rxBytes,
+                        txBytes = txBytes
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to parse peer at index $i", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse peers", e)
+        }
+        return peersMap
+    }
+
+    private fun buildFinalPeerList(
+        routesMap: Map<Long, RouteData>,
+        peersMap: Map<Long, PeerConnectionData>
+    ): List<FinalPeerInfo> {
+        return routesMap.values.map { route ->
             val peerConn = peersMap[route.peerId]
             if (peerConn != null) {
                 FinalPeerInfo(
@@ -64,113 +247,16 @@ object NetworkInfoParser {
                 )
             }
         }
-
-        return DetailedNetworkInfo(
-            myNode = myNode,
-            events = snapshotEvents,
-            finalPeerList = finalPeerList.sortedBy { it.hostname }
-        )
     }
 
-    /**
-     * 从完整的网络快照JSON中，提取出原始的事件JSON字符串数组。
-     * 供 ViewModel 的增量日志收集逻辑调用。
-     */
-    fun extractRawEventStrings(jsonString: String, instanceName: String): List<String> {
-        return try {
-            val root = JSONObject(jsonString)
-            val instance = root.getJSONObject("map").getJSONObject(instanceName)
-            val eventsArray = instance.getJSONArray("events")
-            (0 until eventsArray.length()).map { eventsArray.getString(it) }.reversed()
+    private fun parseEventList(eventsJson: JSONArray?): List<EventInfo> {
+        if (eventsJson == null) return emptyList()
+        val rawEventStrings = try {
+            (0 until eventsJson.length()).map { eventsJson.getString(it) }.reversed()
         } catch (e: Exception) {
-            Log.e("NetworkInfoParser", "Failed to extract raw event strings", e)
+            Log.e(TAG, "Failed to parse event list", e)
             emptyList()
         }
-    }
-
-    // --- 私有解析函数 ---
-
-    private fun parseMyNodeInfo(myNodeJson: JSONObject): MyNodeInfo {
-        val myStunInfoJson = myNodeJson.getJSONObject("stun_info")
-        val ipsJson = myNodeJson.getJSONObject("ips")
-        val virtualIpv4Json = myNodeJson.optJSONObject("virtual_ipv4")
-        val virtualIp = if (virtualIpv4Json != null) {
-            "${
-                parseIntegerToIp(
-                    virtualIpv4Json.getJSONObject("address").getInt("addr")
-                )
-            }/${virtualIpv4Json.getInt("network_length")}"
-        } else {
-            "正在获取中..."
-        }
-        val listenersList = (0 until myNodeJson.getJSONArray("listeners").length()).map {
-            myNodeJson.getJSONArray("listeners").getJSONObject(it).getString("url")
-        }
-        val interfaceIpsList = (0 until ipsJson.getJSONArray("interface_ipv4s").length()).map {
-            parseIntegerToIp(
-                ipsJson.getJSONArray("interface_ipv4s").getJSONObject(it).getInt("addr")
-            )
-        }
-        val publicIpsArray = myStunInfoJson.getJSONArray("public_ip")
-        val publicIpsStr =
-            if (publicIpsArray.length() > 0) (0 until publicIpsArray.length()).joinToString(", ") {
-                publicIpsArray.getString(it)
-            } else "N/A"
-
-        return MyNodeInfo(
-            hostname = myNodeJson.getString("hostname"), version = myNodeJson.getString("version"),
-            virtualIp = virtualIp, publicIp = publicIpsStr,
-            natType = parseNatType(myStunInfoJson.getInt("udp_nat_type")),
-            listeners = listenersList, interfaceIps = interfaceIpsList
-        )
-    }
-
-    private fun parseRoutes(routesJson: org.json.JSONArray): Map<Long, RouteData> {
-        return (0 until routesJson.length()).associate {
-            val route = routesJson.getJSONObject(it)
-            val peerId = route.getLong("peer_id")
-            val ipv4AddrJson = route.optJSONObject("ipv4_addr")
-            val virtualIp = if (ipv4AddrJson != null) parseIntegerToIp(
-                ipv4AddrJson.getJSONObject("address").getInt("addr")
-            ) else "无虚拟IP"
-            peerId to RouteData(
-                peerId = peerId,
-                hostname = route.getString("hostname"),
-                virtualIp = virtualIp,
-                nextHopPeerId = route.getLong("next_hop_peer_id"),
-                pathLatency = route.getInt("path_latency"),
-                cost = route.getInt("cost"),
-                version = route.getString("version"),
-                natType = parseNatType(route.getJSONObject("stun_info").getInt("udp_nat_type")),
-                instId = route.getString("inst_id")
-            )
-        }
-    }
-
-    private fun parsePeers(peersJson: org.json.JSONArray): Map<Long, PeerConnectionData> {
-        val peersMap = mutableMapOf<Long, PeerConnectionData>()
-        for (i in 0 until peersJson.length()) {
-            val peer = peersJson.getJSONObject(i)
-            val conns = peer.getJSONArray("conns")
-            if (conns.length() > 0) {
-                val conn = conns.getJSONObject(0)
-                val peerId = conn.getLong("peer_id")
-                peersMap[peerId] = PeerConnectionData(
-                    peerId = peerId,
-                    physicalAddr = conn.getJSONObject("tunnel").getJSONObject("remote_addr")
-                        .getString("url"),
-                    latencyUs = conn.getJSONObject("stats").getLong("latency_us"),
-                    rxBytes = conn.getJSONObject("stats").getLong("rx_bytes"),
-                    txBytes = conn.getJSONObject("stats").getLong("tx_bytes")
-                )
-            }
-        }
-        return peersMap
-    }
-
-    private fun parseEventList(eventsJson: org.json.JSONArray): List<EventInfo> {
-        val rawEventStrings =
-            (0 until eventsJson.length()).map { eventsJson.getString(it) }.reversed()
         return rawEventStrings.mapNotNull { parseSingleRawEvent(it) }
     }
 
@@ -190,53 +276,57 @@ object NetworkInfoParser {
 
                 "PeerConnAdded" -> {
                     val conn = eventObject.getJSONObject("PeerConnAdded")
-                    val peerId = conn.getLong("peer_id").toString().takeLast(4)
-                    val tunnelType =
-                        conn.getJSONObject("tunnel").getString("tunnel_type").uppercase()
-                    val remoteAddr =
-                        conn.getJSONObject("tunnel").getJSONObject("remote_addr").getString("url")
+                    val peerId = conn.optLong("peer_id", 0).toString().takeLast(4)
+                    val tunnelJson = conn.optJSONObject("tunnel")
+                    val tunnelType = tunnelJson?.optString("tunnel_type", "?")?.uppercase() ?: "?"
+                    val remoteAddr = tunnelJson?.optJSONObject("remote_addr")
+                        ?.optString("url", "未知") ?: "未知"
                     "[$tunnelType] 节点($peerId)已连接: $remoteAddr" to EventInfo.Level.SUCCESS
                 }
 
                 "PeerConnRemoved" -> "节点(${
-                    eventObject.getJSONObject("PeerConnRemoved").getLong("peer_id").toString()
-                        .takeLast(4)
+                    eventObject.optJSONObject("PeerConnRemoved")
+                        ?.optLong("peer_id", 0).toString().takeLast(4)
                 })连接已断开" to EventInfo.Level.WARNING
 
                 "PeerAdded" -> "发现新节点(${
-                    eventObject.getLong("PeerAdded").toString().takeLast(4)
+                    eventObject.optLong("PeerAdded", 0).toString().takeLast(4)
                 })" to EventInfo.Level.INFO
 
                 "PeerRemoved" -> "节点(${
-                    eventObject.getLong("PeerRemoved").toString().takeLast(4)
+                    eventObject.optLong("PeerRemoved", 0).toString().takeLast(4)
                 })已移除" to EventInfo.Level.WARNING
 
-                "ConnectionAccepted" -> "接受来自 ${
-                    eventObject.getJSONArray("ConnectionAccepted").getString(1)
-                } 的连接" to EventInfo.Level.SUCCESS
+                "ConnectionAccepted" -> {
+                    val arr = eventObject.optJSONArray("ConnectionAccepted")
+                    val addr = arr?.optString(1, "未知") ?: "未知"
+                    "接受来自 $addr 的连接" to EventInfo.Level.SUCCESS
+                }
 
-                "ConnectionError" -> "连接错误: ${
-                    eventObject.getJSONArray("ConnectionError").getString(2)
-                }" to EventInfo.Level.ERROR
+                "ConnectionError" -> {
+                    val arr = eventObject.optJSONArray("ConnectionError")
+                    val msg = arr?.optString(2, "未知错误") ?: "未知错误"
+                    "连接错误: $msg" to EventInfo.Level.ERROR
+                }
 
-                "ListenerAdded" -> "开始监听: ${eventObject.getString("ListenerAdded")}" to EventInfo.Level.INFO
-                "Connecting" -> "正在连接: ${eventObject.getString("Connecting")}" to EventInfo.Level.INFO
+                "ListenerAdded" -> "开始监听: ${eventObject.optString("ListenerAdded", "")}" to EventInfo.Level.INFO
+                "Connecting" -> "正在连接: ${eventObject.optString("Connecting", "")}" to EventInfo.Level.INFO
                 "TunDeviceReady" -> "虚拟网卡已就绪" to EventInfo.Level.SUCCESS
                 "DhcpIpv4Changed" -> {
-                    val arr = eventObject.getJSONArray("DhcpIpv4Changed")
-                    val oldIp = arr.optString(0, "无")
-                    val newIp = arr.optString(1, "N/A")
+                    val arr = eventObject.optJSONArray("DhcpIpv4Changed")
+                    val oldIp = arr?.optString(0, "无") ?: "无"
+                    val newIp = arr?.optString(1, "N/A") ?: "N/A"
                     "DHCP IP 变更: $oldIp -> $newIp" to EventInfo.Level.INFO
                 }
 
                 else -> {
-                    val content = eventObject.get(eventType).toString()
+                    val content = eventObject.opt(eventType)?.toString() ?: ""
                     "$eventType: $content" to EventInfo.Level.INFO
                 }
             }
             EventInfo(time, message, level, rawTime)
         } catch (e: Exception) {
-            Log.e("NetworkInfoParser", "Failed to parse single event string: $eventStr", e)
+            Log.e(TAG, "Failed to parse single event string: $eventStr", e)
             null
         }
     }
@@ -257,7 +347,35 @@ object NetworkInfoParser {
         return String.format("%.1f %sB", bytes / 1024.0.pow(exp.toDouble()), pre)
     }
 
-    private fun parseNatType(typeCode: Int): String {
+    /**
+     * 解析 NAT 类型。pbjson 将枚举序列化为字符串（如 "Symmetric"），
+     * 但也兼容旧的整数格式（如 6）。
+     */
+    private fun parseNatType(raw: Any?): String {
+        return when (raw) {
+            is String -> natTypeFromName(raw)
+            is Int -> natTypeFromCode(raw)
+            else -> "Unknown (未知类型)"
+        }
+    }
+
+    private fun natTypeFromName(name: String): String {
+        return when (name) {
+            "Unknown" -> "Unknown (未知类型)"
+            "OpenInternet" -> "Open Internet (开放互联网)"
+            "NoPAT" -> "No PAT (无端口转换)"
+            "FullCone" -> "Full Cone (完全锥形)"
+            "Restricted" -> "Restricted Cone (限制锥形)"
+            "PortRestricted" -> "Port Restricted (端口限制锥形)"
+            "Symmetric" -> "Symmetric (对称型)"
+            "SymUdpFirewall" -> "Symmetric UDP Firewall (对称UDP防火墙)"
+            "SymmetricEasyInc" -> "Symmetric Easy Inc (对称型-端口递增)"
+            "SymmetricEasyDec" -> "Symmetric Easy Dec (对称型-端口递减)"
+            else -> name
+        }
+    }
+
+    private fun natTypeFromCode(typeCode: Int): String {
         return when (typeCode) {
             0 -> "Unknown (未知类型)"; 1 -> "Open Internet (开放互联网)"; 2 -> "No PAT (无端口转换)"
             3 -> "Full Cone (完全锥形)"; 4 -> "Restricted Cone (限制锥形)"; 5 -> "Port Restricted (端口限制锥形)"
@@ -271,7 +389,7 @@ object NetworkInfoParser {
 // --- 数据模型 (Data Models) ---
 @Keep
 data class DetailedNetworkInfo(
-    val myNode: MyNodeInfo,
+    val myNode: MyNodeInfo?,
     val events: List<EventInfo>,
     val finalPeerList: List<FinalPeerInfo>
 )
