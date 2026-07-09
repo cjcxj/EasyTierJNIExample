@@ -1,12 +1,14 @@
 package com.easytier.app.ui
 
 import android.net.Uri
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
@@ -14,9 +16,12 @@ import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.easytier.app.ConfigData
 import com.easytier.app.Screen
@@ -61,66 +66,124 @@ fun MainScreen(
         }
     }
 
+    val statusColor by animateColorAsState(
+        targetValue = if (isRunning) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.outline,
+        animationSpec = tween(600),
+        label = "statusColor"
+    )
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("EasyTier VPN 控制面板") },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("EasyTier VPN", style = MaterialTheme.typography.titleLarge)
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(statusColor, CircleShape)
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
                 )
             )
-        }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .padding(paddingValues)
-                .fillMaxSize()
-        ) {
-            TabRow(selectedTabIndex = pagerState.currentPage) {
+        },
+        bottomBar = {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = NavigationBarDefaults.Elevation
+            ) {
                 tabs.forEachIndexed { index, tabItem ->
-                    Tab(
+                    NavigationBarItem(
                         selected = pagerState.currentPage == index,
                         onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
-                        text = { Text(tabItem.title) },
-                        icon = { Icon(tabItem.icon, contentDescription = tabItem.title) }
+                        icon = {
+                            if (index == 1) {
+                                val peerCount = detailedInfo?.finalPeerList?.size ?: 0
+                                if (peerCount > 0) {
+                                    BadgedBox(badge = { Badge { Text(peerCount.toString()) } }) {
+                                        Icon(
+                                            tabItem.icon,
+                                            contentDescription = tabItem.title,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                } else {
+                                    Icon(
+                                        tabItem.icon,
+                                        contentDescription = tabItem.title,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            } else {
+                                Icon(
+                                    tabItem.icon,
+                                    contentDescription = tabItem.title,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        },
+                        label = {
+                            Text(
+                                tabItem.title,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     )
                 }
             }
+        }
+    ) { paddingValues ->
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) { page ->
+            when (page) {
+                0 -> ControlTab(
+                    allConfigs = allConfigs,
+                    activeConfig = activeConfig,
+                    onActiveConfigChange = onActiveConfigChange,
+                    onAddNewConfig = onAddNewConfig,
+                    onDeleteConfig = onDeleteConfig,
+                    onConfigChange = onConfigChange,
+                    isRunning = isRunning,
+                    status = status,
+                    onControlButtonClick = onControlButtonClick,
+                    onExportConfig = onExportConfig,
+                    onImportConfig = onImportConfig
+                )
 
-            HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
-                when (page) {
-                    0 -> ControlTab(
-                        allConfigs = allConfigs,
-                        activeConfig = activeConfig,
-                        onActiveConfigChange = onActiveConfigChange,
-                        onAddNewConfig = onAddNewConfig,
-                        onDeleteConfig = onDeleteConfig,
-                        onConfigChange = onConfigChange,
-                        isRunning = isRunning,
-                        onControlButtonClick = onControlButtonClick,
-                        onExportConfig = onExportConfig,
-                        onImportConfig = onImportConfig
-                    )
-
-                    1 -> StatusTab(
-                        status = status, isRunning = isRunning, detailedInfo = detailedInfo,
-                        onRefreshDetailedInfo = onRefreshDetailedInfo,
-                        onPeerClick = { peer ->
-                            navController.navigate(
-                                Screen.PeerDetail.createRoute(
-                                    peer.peerId
-                                )
+                1 -> StatusTab(
+                    status = status, isRunning = isRunning, detailedInfo = detailedInfo,
+                    onRefreshDetailedInfo = onRefreshDetailedInfo,
+                    onPeerClick = { peer ->
+                        navController.navigate(
+                            Screen.PeerDetail.createRoute(
+                                peer.peerId
                             )
-                        },
-                        onCopyJsonClick = onCopyJsonClick
-                    )
+                        )
+                    },
+                    onCopyJsonClick = onCopyJsonClick
+                )
 
-                    2 -> LogTab(
-                        rawEvents = rawEventHistory,
-                        onExportClicked = onExportLogsClicked
-                    )
-                }
+                2 -> LogTab(
+                    rawEvents = rawEventHistory,
+                    onExportClicked = onExportLogsClicked
+                )
             }
         }
     }

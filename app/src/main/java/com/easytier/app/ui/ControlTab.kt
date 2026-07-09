@@ -4,9 +4,19 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -16,13 +26,18 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.easytier.app.ConfigData
 import com.easytier.app.PortForwardItem
 import com.easytier.app.ui.ConfigSwitchWithInlineHelp
+import com.easytier.jni.EasyTierManager
 
 private object HelpTexts {
     const val RELAY_WHITELIST =
@@ -46,6 +61,32 @@ private object HelpTexts {
     const val DISABLE_UDP_HOLE_PUNCHING = "禁用常规的 UDP 打洞尝试，可能影响 P2P 连接建立。"
     const val DISABLE_SYM_HOLE_PUNCHING =
         "禁用针对对称 NAT 的打洞技术（生日攻击），会将其视为更简单的锥形 NAT 处理。"
+    const val P2P_ONLY = "仅与已建立 P2P 连接的对端通信。"
+    const val LAZY_P2P =
+        "仅当确实需要与某对端通信时才尝试建立 P2P；标记为 need_p2p 的对端仍会主动连接。"
+    const val NEED_P2P =
+        "声明其他节点应主动与本节点建立 P2P 连接（即使它们启用了 lazy_p2p）。"
+    const val DISABLE_TCP_HOLE_PUNCHING = "禁用 TCP 打洞。"
+    const val DISABLE_RELAY_QUIC = "禁用中转 QUIC 数据包，避免消耗过多带宽。"
+    const val ENABLE_RELAY_FOREIGN_NETWORK_QUIC = "允许中转来自外部网络的 QUIC 数据包。"
+    const val DISABLE_UPNP = "禁用运行时 UPnP/NAT-PMP 端口映射。"
+    const val DISABLE_RELAY_DATA = "禁止本节点为其他节点中转数据流量。"
+    const val ENABLE_UDP_BROADCAST_RELAY =
+        "捕获物理接口的本地 UDP 广播包并转发给 EasyTier 对端（便于局域网游戏发现房间，Windows 专用，需管理员权限）。"
+    const val ENCRYPTION_ALGORITHM =
+        "加密算法，支持 ''、'xor'、'chacha20'、'aes-gcm'、'aes-gcm-256'、'openssl-aes128-gcm'、'openssl-aes256-gcm'、'openssl-chacha20'。留空表示默认（aes-gcm）。"
+    const val IPV6_ADDR =
+        "此VPN节点的IPv6地址，可与IPv4一起使用以进行双栈操作。例如：fd00::1/64"
+    const val STUN_SERVERS =
+        "覆盖内置的默认 STUN server 列表；如果设置了但是为空，则不使用 STUN servers；如果没设置，则使用默认 STUN server 列表"
+    const val STUN_SERVERS_V6 =
+        "覆盖内置的默认 IPv6 STUN server 列表；如果设置了但是为空，则不使用 IPv6 STUN servers；如果没设置，则使用默认 IPv6 STUN server 列表"
+    const val SECURE_MODE =
+        "如果为true，则启用安全模式。默认值为false"
+    const val LOCAL_PRIVATE_KEY =
+        "安全模式下的本地私钥。如果未提供，则会随机生成一个密钥"
+    const val LOCAL_PUBLIC_KEY =
+        "安全模式下的本地公钥。如果未提供，则会随机生成一个密钥，或者使用本地私钥派生公钥"
     const val RELAY_ALL_RPC =
         "允许转发所有对等节点的 RPC 数据包，即使它们不在转发网络白名单中。有助于白名单外的节点建立 P2P 连接。"
     const val PROXY_FORWARD_BY_SYSTEM = "通过操作系统内核（而非内置 NAT）来转发子网代理的数据包。"
@@ -57,6 +98,29 @@ private object HelpTexts {
         "启用 socks5 服务器，允许 socks5 客户端访问虚拟网络. 格式: <端口>，例如：1080"
     const val PORT_FORWARD_HELP =
         "将本地端口转发到虚拟网络中的远程端口。例如：udp://0.0.0.0:12345/10.126.126.1:23456，表示将本地UDP端口12345转发到虚拟网络中的10.126.126.1:23456。可以指定多个。"
+    const val DISABLE_RELAY_KCP = "禁用中转 KCP 数据包。"
+    const val ENABLE_RELAY_FOREIGN_NETWORK_KCP = "允许中转来自外部网络的 KCP 数据包。"
+    const val DATA_COMPRESS_ALGO = "数据压缩算法，留空=默认(aes-gcm)，可选: none, zstd"
+    const val MULTI_THREAD_COUNT = "多线程模式下的线程数，默认为2。"
+    const val TLD_DNS_ZONE = "Magic DNS 的 TLD 域名区域，例如 'et' 表示通过 'hostname.et' 访问。"
+    const val CREDENTIAL_FILE = "凭证文件路径，用于无密钥认证的对等节点凭证。"
+    const val IPV6_PUBLIC_ADDR_PROVIDER = "启用 IPv6 公网地址提供者，为其他节点分配 IPv6 公网地址。"
+    const val IPV6_PUBLIC_ADDR_AUTO = "自动获取 IPv6 公网地址前缀。"
+    const val IPV6_PUBLIC_ADDR_PREFIX = "IPv6 公网地址前缀，例如 'fd00:1234::/48'。"
+
+    // --- 文本字段帮助文本 (对齐上游 app.yml) ---
+    const val INSTANCE_NAME = "用于在同一机器上标识此 VPN 节点的实例名称。"
+    const val NETWORK_NAME = "用于标识此 VPN 网络的网络名称。"
+    const val NETWORK_SECRET = "网络密钥，用于验证此节点属于该 VPN 网络。留空在安全模式下可启用凭据模式。"
+    const val PEERS = "初始连接的对等节点，每行一个。例如：tcp://public.easytier.top:11010"
+    const val DHCP = "自动确定并设置 IP 地址。EasyTier 会从网络中分配一个可用的虚拟 IP。"
+    const val VIRTUAL_IPV4 = "此 VPN 节点的 IPv4 地址。例如：10.0.0.1/24"
+    const val HOSTNAME = "用于标识此设备的主机名，可用于 Magic DNS 解析。留空则自动获取系统主机名。"
+    const val LISTENERS = "监听器列表，每行一个。格式：协议://地址:端口。例如：tcp://0.0.0.0:11010、udp://0.0.0.0:11010、wg://0.0.0.0:11011"
+    const val DEV_NAME = "可选的 TUN 接口名称。留空则自动生成。"
+    const val MTU = "TUN 接口的 MTU 值。留空使用默认值 1380。"
+    const val PROXY_NETWORKS = "子网代理的 CIDR 网络，每行一个。可选映射到另一 CIDR。例如：10.147.223.0/24"
+    const val DEFAULT_PROTOCOL = "连接对等节点时使用的默认协议。可选：tcp、udp、ws、wss、quic。默认 tcp。"
 }
 
 
@@ -72,6 +136,7 @@ private object HelpTexts {
  * @param onDeleteConfig 当用户确认删除当前配置时调用。
  * @param onConfigChange 当用户编辑当前配置的任何字段时调用。
  * @param isRunning 服务当前是否在运行。
+ * @param status 当前 EasyTier 运行状态（用于 Hero 卡片显示虚拟 IP），可为 null。
  * @param onControlButtonClick 当主启动/停止按钮被点击时调用。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -84,6 +149,7 @@ fun ControlTab(
     onDeleteConfig: (ConfigData) -> Unit,
     onConfigChange: (ConfigData) -> Unit,
     isRunning: Boolean,
+    status: EasyTierManager.EasyTierStatus?,
     onControlButtonClick: () -> Unit,
     onExportConfig: (Uri) -> Unit,
     onImportConfig: (Uri) -> Unit
@@ -119,17 +185,14 @@ fun ControlTab(
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- 顶部控制行 ---
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Button(
-                onClick = onControlButtonClick,
-                modifier = Modifier.weight(1f),
-                enabled = activeConfig.instanceName.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                )
-            ) { Text(if (isRunning) "停止服务" else "启动服务", fontSize = 18.sp) }
-
+        // --- Hero 状态卡（顶部） ---
+        HeroStatusCard(
+            isRunning = isRunning,
+            instanceName = activeConfig.instanceName,
+            virtualIp = status?.currentIpv4 ?: activeConfig.virtualIpv4,
+            controlEnabled = activeConfig.instanceName.isNotBlank(),
+            onControlButtonClick = onControlButtonClick
+        ) {
             Box {
                 IconButton(onClick = { showMenu = true }, enabled = !isRunning) {
                     Icon(
@@ -189,24 +252,27 @@ fun ControlTab(
         Spacer(Modifier.height(16.dp))
 
         // --- 核心配置 ---
-        CollapsibleConfigSection(title = "核心配置", initiallyExpanded = true) {
+        CollapsibleConfigSection(title = "核心配置", icon = Icons.Default.Settings, initiallyExpanded = true) {
             ConfigTextField(
                 "实例名",
                 activeConfig.instanceName,
                 { onConfigChange(activeConfig.copy(instanceName = it)) },
-                enabled = !isRunning
+                enabled = !isRunning,
+                helpText = HelpTexts.INSTANCE_NAME
             )
             ConfigTextField(
                 "网络名",
                 activeConfig.networkName,
                 { onConfigChange(activeConfig.copy(networkName = it)) },
-                enabled = !isRunning
+                enabled = !isRunning,
+                helpText = HelpTexts.NETWORK_NAME
             )
             ConfigTextField(
                 "网络密钥",
                 activeConfig.networkSecret,
                 { onConfigChange(activeConfig.copy(networkSecret = it)) },
-                enabled = !isRunning
+                enabled = !isRunning,
+                helpText = HelpTexts.NETWORK_SECRET
             )
             ConfigTextField(
                 label = "对等节点 (Peers, 每行一个)",
@@ -214,14 +280,15 @@ fun ControlTab(
                 onValueChange = { onConfigChange(activeConfig.copy(peers = it)) },
                 enabled = !isRunning,
                 singleLine = false,
-                modifier = Modifier.height(120.dp)
+                modifier = Modifier.height(120.dp),
+                helpText = HelpTexts.PEERS
             )
         }
 
         // --- IP & 接口配置 ---
-        CollapsibleConfigSection(title = "IP 与接口") {
+        CollapsibleConfigSection(title = "IP 与接口", icon = Icons.Default.Language) {
             // DHCP 开关
-            ConfigSwitch(
+            ConfigSwitchWithInlineHelp(
                 label = "自动分配IP (DHCP)",
                 checked = activeConfig.dhcp,
                 onCheckedChange = { dhcpEnabled ->
@@ -231,6 +298,7 @@ fun ControlTab(
                         else activeConfig.copy(dhcp = false)
                     )
                 },
+                helpText = HelpTexts.DHCP,
                 enabled = !isRunning
             )
             Row(
@@ -262,6 +330,14 @@ fun ControlTab(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
             }
+            Text(
+                text = HelpTexts.VIRTUAL_IPV4,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             Spacer(Modifier.height(8.dp))
 
@@ -270,31 +346,35 @@ fun ControlTab(
                 activeConfig.hostname,
                 { onConfigChange(activeConfig.copy(hostname = it)) },
                 enabled = !isRunning,
-                placeholder = "留空则自动获取"
+                placeholder = "留空则自动获取",
+                helpText = HelpTexts.HOSTNAME
             )
             ConfigTextField(
-                "监听器(每行一个)",
-                activeConfig.listenerUrls,
-                { onConfigChange(activeConfig.copy(listenerUrls = it)) },
-                enabled = !isRunning,
-                singleLine = false,
-                modifier = Modifier.height(100.dp)
-            )
-            ConfigTextField(
-                "映射监听器(每行一个)",
-                activeConfig.mappedListeners,
-                { onConfigChange(activeConfig.copy(mappedListeners = it)) },
+                label = "监听器(每行一个)",
+                value = activeConfig.listenerUrls,
+                onValueChange = { onConfigChange(activeConfig.copy(listenerUrls = it)) },
                 enabled = !isRunning,
                 singleLine = false,
                 modifier = Modifier.height(100.dp),
-                placeholder = "手动指定监听器的公网地址，其他节点可以使用该地址连接到本节点。"
+                helpText = HelpTexts.LISTENERS
+            )
+            ConfigTextField(
+                label = "映射监听器(每行一个)",
+                value = activeConfig.mappedListeners,
+                onValueChange = { onConfigChange(activeConfig.copy(mappedListeners = it)) },
+                enabled = !isRunning,
+                singleLine = false,
+                modifier = Modifier.height(100.dp),
+                placeholder = "手动指定监听器的公网地址，其他节点可以使用该地址连接到本节点。",
+                helpText = "手动指定监听器的公网地址（含端口），用于 NAT 后的环境。每行一个，格式与监听器相同。"
             )
             ConfigTextField(
                 "TUN设备名 (dev_name)",
                 activeConfig.devName,
                 { onConfigChange(activeConfig.copy(devName = it)) },
                 enabled = !isRunning,
-                placeholder = "留空则自动"
+                placeholder = "留空则自动",
+                helpText = HelpTexts.DEV_NAME
             )
             ConfigTextField(
                 "MTU",
@@ -302,13 +382,14 @@ fun ControlTab(
                 { onConfigChange(activeConfig.copy(mtu = it)) },
                 enabled = !isRunning,
                 placeholder = "TUN设备的MTU，默认为非加密时为1380，加密时为1360。范围：400-1380",
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                helpText = HelpTexts.MTU
             )
 
         }
 
         // --- 功能标志 (Flags) ---
-        CollapsibleConfigSection(title = "功能标志 (Flags)") {
+        CollapsibleConfigSection(title = "功能标志 (Flags)", icon = Icons.Default.Flag) {
             ConfigSwitchWithInlineHelp(
                 "启用转发白名单",
                 activeConfig.enableRelayNetworkWhitelist,
@@ -335,13 +416,6 @@ fun ControlTab(
                         activeConfig.latencyFirst,
                         { onConfigChange(activeConfig.copy(latencyFirst = it)) },
                         HelpTexts.LATENCY_FIRST,
-                        !isRunning
-                    )
-                    ConfigSwitchWithInlineHelp(
-                        "私有模式",
-                        activeConfig.privateMode,
-                        { onConfigChange(activeConfig.copy(privateMode = it)) },
-                        HelpTexts.PRIVATE_MODE,
                         !isRunning
                     )
                     ConfigSwitchWithInlineHelp(
@@ -393,6 +467,34 @@ fun ControlTab(
                         HelpTexts.MULTI_THREAD,
                         !isRunning
                     )
+                    ConfigSwitchWithInlineHelp(
+                        "仅P2P",
+                        activeConfig.p2pOnly,
+                        { onConfigChange(activeConfig.copy(p2pOnly = it)) },
+                        HelpTexts.P2P_ONLY,
+                        !isRunning
+                    )
+                    ConfigSwitchWithInlineHelp(
+                        "懒加载P2P",
+                        activeConfig.lazyP2p,
+                        { onConfigChange(activeConfig.copy(lazyP2p = it)) },
+                        HelpTexts.LAZY_P2P,
+                        !isRunning
+                    )
+                    ConfigSwitchWithInlineHelp(
+                        "需要P2P",
+                        activeConfig.needP2p,
+                        { onConfigChange(activeConfig.copy(needP2p = it)) },
+                        HelpTexts.NEED_P2P,
+                        !isRunning
+                    )
+                    ConfigSwitchWithInlineHelp(
+                        "禁用TCP打洞",
+                        activeConfig.disableTcpHolePunching,
+                        { onConfigChange(activeConfig.copy(disableTcpHolePunching = it)) },
+                        HelpTexts.DISABLE_TCP_HOLE_PUNCHING,
+                        !isRunning
+                    )
                 }
                 Column(Modifier.weight(1f)) {
                     ConfigSwitchWithInlineHelp(
@@ -407,13 +509,6 @@ fun ControlTab(
                         activeConfig.disableIpv6,
                         { onConfigChange(activeConfig.copy(disableIpv6 = it)) },
                         HelpTexts.DISABLE_IPV6,
-                        !isRunning
-                    )
-                    ConfigSwitchWithInlineHelp(
-                        "魔法DNS",
-                        activeConfig.acceptDns,
-                        { onConfigChange(activeConfig.copy(acceptDns = it)) },
-                        HelpTexts.ACCEPT_DNS,
                         !isRunning
                     )
                     ConfigSwitchWithInlineHelp(
@@ -465,24 +560,40 @@ fun ControlTab(
                         HelpTexts.NO_TUN,
                         !isRunning
                     )
+                    ConfigSwitchWithInlineHelp(
+                        "禁用UPnP",
+                        activeConfig.disableUpnp,
+                        { onConfigChange(activeConfig.copy(disableUpnp = it)) },
+                        HelpTexts.DISABLE_UPNP,
+                        !isRunning
+                    )
+                    ConfigSwitchWithInlineHelp(
+                        "UDP广播转发",
+                        activeConfig.enableUdpBroadcastRelay,
+                        { onConfigChange(activeConfig.copy(enableUdpBroadcastRelay = it)) },
+                        HelpTexts.ENABLE_UDP_BROADCAST_RELAY,
+                        !isRunning
+                    )
                 }
             }
         }
         // --- 高级路由配置 ---
-        CollapsibleConfigSection(title = "高级路由") {
+        CollapsibleConfigSection(title = "高级路由", icon = Icons.Default.AltRoute) {
             ConfigTextField(
-                "代理子网",
-                activeConfig.proxyNetworks,
-                { onConfigChange(activeConfig.copy(proxyNetworks = it)) },
+                label = "代理子网",
+                value = activeConfig.proxyNetworks,
+                onValueChange = { onConfigChange(activeConfig.copy(proxyNetworks = it)) },
                 enabled = !isRunning,
                 singleLine = false,
                 modifier = Modifier.height(100.dp),
-                placeholder = "子网代理CIDR,每行一个CIDR"
+                placeholder = "子网代理CIDR,每行一个",
+                helpText = HelpTexts.PROXY_NETWORKS
             )
-            ConfigSwitch(
+            ConfigSwitchWithInlineHelp(
                 "启用自定义路由",
                 activeConfig.enableManualRoutes,
                 { onConfigChange(activeConfig.copy(enableManualRoutes = it)) },
+                HelpTexts.MANUAL_ROUTES_HELP,
                 enabled = !isRunning
             )
             ConfigTextField(
@@ -492,20 +603,32 @@ fun ControlTab(
                 enabled = !isRunning && activeConfig.enableManualRoutes,
                 singleLine = false,
                 modifier = Modifier.height(120.dp),
-                placeholder = HelpTexts.MANUAL_ROUTES_HELP
+                placeholder = "例如: 192.168.0.0/16",
+                helpText = HelpTexts.MANUAL_ROUTES_HELP
             )
             ConfigTextField(
-                "出口节点 (Exit Nodes)",
-                activeConfig.exitNodes,
-                { onConfigChange(activeConfig.copy(exitNodes = it)) },
+                label = "出口节点 (Exit Nodes)",
+                value = activeConfig.exitNodes,
+                onValueChange = { onConfigChange(activeConfig.copy(exitNodes = it)) },
                 enabled = !isRunning,
                 singleLine = false,
                 modifier = Modifier.height(100.dp),
-                placeholder = "转发所有流量的出口节点，虚拟IPv4地址，优先级由列表顺序决定"
+                placeholder = "每行一个虚拟 IPv4 地址",
+                helpText = "转发所有流量的出口节点列表（虚拟 IPv4 地址），优先级由列表顺序决定。"
+            )
+        }
+        // --- IPv6 公网地址 ---
+        CollapsibleConfigSection(title = "IPv6 公网地址", icon = Icons.Default.Public) {
+            ConfigSwitchWithInlineHelp(
+                "自动获取IPv6前缀",
+                activeConfig.ipv6PublicAddrAuto,
+                { onConfigChange(activeConfig.copy(ipv6PublicAddrAuto = it)) },
+                HelpTexts.IPV6_PUBLIC_ADDR_AUTO,
+                enabled = !isRunning
             )
         }
         // --- 服务与门户 ---
-        CollapsibleConfigSection(title = "服务与门户") {
+        CollapsibleConfigSection(title = "服务与门户", icon = Icons.Default.Dns) {
             ConfigSwitchWithInlineHelp(
                 "启用SOCKS5代理",
                 activeConfig.enableSocks5,
@@ -527,17 +650,20 @@ fun ControlTab(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
             )
             Spacer(Modifier.height(16.dp))
-            ConfigSwitch(
+            ConfigSwitchWithInlineHelp(
                 "启用VPN门户",
                 activeConfig.enableVpnPortal,
                 { onConfigChange(activeConfig.copy(enableVpnPortal = it)) },
+                "启用基于 WireGuard 协议的 VPN 门户，允许其他 WireGuard 客户端接入此虚拟网络。",
                 enabled = !isRunning
             )
             ConfigTextField(
                 "VPN门户客户端网段",
                 activeConfig.vpnPortalClientNetworkAddr,
                 { onConfigChange(activeConfig.copy(vpnPortalClientNetworkAddr = it)) },
-                enabled = !isRunning && activeConfig.enableVpnPortal
+                enabled = !isRunning && activeConfig.enableVpnPortal,
+                placeholder = "例如: 10.14.14.0",
+                helpText = "分配给 WireGuard 客户端的网段地址（不含掩码），默认 10.14.14.0。"
             )
             OutlinedTextField(
                 value = activeConfig.vpnPortalListenPort.toString(),
@@ -552,29 +678,10 @@ fun ControlTab(
                 enabled = !isRunning && activeConfig.enableVpnPortal,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
             )
-            CollapsibleConfigSection(title = "远程管理 (RPC)") {
-                ConfigTextField(
-                    label = "RPC 门户地址",
-                    value = activeConfig.rpcPortal,
-                    onValueChange = { onConfigChange(activeConfig.copy(rpcPortal = it)) },
-                    enabled = !isRunning,
-                    placeholder = "例如: 0.0.0.0:15888, 留空则禁用"
-                )
-
-                ConfigTextField(
-                    label = "RPC 白名单 (每行一个)",
-                    value = activeConfig.rpcPortalWhitelist,
-                    onValueChange = { onConfigChange(activeConfig.copy(rpcPortalWhitelist = it)) },
-                    enabled = !isRunning,
-                    singleLine = false,
-                    modifier = Modifier.height(100.dp),
-                    placeholder = "例如: 127.0.0.1/24"
-                )
-            }
         }
 
         // --- 端口转发配置 ---
-        CollapsibleConfigSection(title = "端口转发") {
+        CollapsibleConfigSection(title = "端口转发", icon = Icons.Default.MultipleStop) {
             // 添加帮助文本说明
             Text(
                 text = HelpTexts.PORT_FORWARD_HELP,
@@ -634,6 +741,133 @@ fun ControlTab(
                 },
                 dismissButton = { OutlinedButton({ showDeleteDialog = false }) { Text("取消") } }
             )
+        }
+    }
+}
+
+/**
+ * 顶部 Hero 状态卡：渐变背景 + 脉冲状态点 + 实例/IP 信息 + 全宽启停按钮（带 Crossfade）。
+ * [configMenu] 为右侧配置菜单槽（IconButton + DropdownMenu）。
+ */
+@Composable
+fun HeroStatusCard(
+    isRunning: Boolean,
+    instanceName: String,
+    virtualIp: String,
+    controlEnabled: Boolean,
+    onControlButtonClick: () -> Unit,
+    configMenu: @Composable () -> Unit
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "heroPulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "heroPulseAlpha"
+    )
+    val controlInteractionSource = remember { MutableInteractionSource() }
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 3.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = Brush.horizontalGradient(
+                        colors = if (isRunning)
+                            listOf(
+                                MaterialTheme.colorScheme.primaryContainer,
+                                MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        else
+                            listOf(
+                                MaterialTheme.colorScheme.surfaceVariant,
+                                MaterialTheme.colorScheme.surface
+                            )
+                    ),
+                    shape = MaterialTheme.shapes.large
+                )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isRunning) Color(0xFF4CAF50)
+                                else MaterialTheme.colorScheme.outline,
+                                CircleShape
+                            )
+                            .then(
+                                if (isRunning) Modifier.background(
+                                    Color(0xFF4CAF50).copy(alpha = pulseAlpha),
+                                    CircleShape
+                                )
+                                else Modifier
+                            )
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = instanceName.ifBlank { "未命名实例" },
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (virtualIp.isNotBlank()) virtualIp else "未分配 IP",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    configMenu()
+                }
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = onControlButtonClick,
+                    enabled = controlEnabled,
+                    interactionSource = controlInteractionSource,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .pressableScale(interactionSource = controlInteractionSource),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isRunning) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Crossfade(
+                        targetState = isRunning,
+                        animationSpec = tween(300),
+                        label = "controlBtnCrossfade"
+                    ) { running ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (running) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                            Text(
+                                if (running) "停止服务" else "启动服务",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -708,37 +942,69 @@ fun PortForwardRow(
 @Composable
 fun CollapsibleConfigSection(
     title: String,
+    icon: ImageVector,
     initiallyExpanded: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
-    Card(
+    ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
+            .padding(vertical = 6.dp),
+        shape = MaterialTheme.shapes.large,
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
     ) {
         Column {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .clip(MaterialTheme.shapes.large)
+                    .background(
+                        brush = Brush.horizontalGradient(
+                            colors = if (expanded)
+                                listOf(
+                                    MaterialTheme.colorScheme.primaryContainer,
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            else
+                                listOf(
+                                    MaterialTheme.colorScheme.surfaceVariant,
+                                    MaterialTheme.colorScheme.surface
+                                )
+                        )
+                    )
             ) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                    contentDescription = if (expanded) "折叠" else "展开",
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expanded = !expanded }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = if (expanded) "折叠" else "展开",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             AnimatedVisibility(visible = expanded) {
                 Column(
                     modifier = Modifier
-                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                        .padding(16.dp)
                         .fillMaxWidth()
                 ) {
                     content()
@@ -757,20 +1023,33 @@ fun ConfigTextField(
     singleLine: Boolean = true,
     placeholder: String = "",
     modifier: Modifier = Modifier,
-    keyboardOptions: KeyboardOptions = KeyboardOptions.Default
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    helpText: String? = null
 ) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(label) },
-        placeholder = { Text(placeholder) },
-        enabled = enabled,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        singleLine = singleLine,
-        keyboardOptions = keyboardOptions
-    )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text(label) },
+            placeholder = { Text(placeholder) },
+            enabled = enabled,
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            singleLine = singleLine,
+            keyboardOptions = keyboardOptions
+        )
+        if (!helpText.isNullOrBlank()) {
+            Text(
+                text = helpText,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 @Composable
