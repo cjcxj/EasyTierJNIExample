@@ -34,7 +34,7 @@ object EasyTierDataPlaneJNI {
     /**
      * 查询异步操作状态。
      * @param handle 异步操作句柄
-     * @return 状态码；具体语义见上游 data_plane_api
+     * @return 状态码：0=进行中(PENDING)，1=已完成(READY)，-1=失败(FAILED)，-2=无效(INVALID)
      */
     @JvmStatic
     external fun dataPlaneAsyncOpStatus(handle: Long): Int
@@ -43,7 +43,7 @@ object EasyTierDataPlaneJNI {
      * 阻塞等待异步操作完成或超时。
      * @param handle 异步操作句柄
      * @param timeoutMs 超时（毫秒），0 表示不等待
-     * @return 0 完成；其他值见上游
+     * @return 0=进行中(PENDING/超时)，1=已完成(READY)，-1=失败(FAILED)，-2=无效(INVALID)
      */
     @JvmStatic
     external fun dataPlaneAsyncOpWait(handle: Long, timeoutMs: Long): Int

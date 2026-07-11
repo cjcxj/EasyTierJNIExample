@@ -150,7 +150,9 @@ fun ControlTab(
     onConfigChange: (ConfigData) -> Unit,
     isRunning: Boolean,
     status: EasyTierManager.EasyTierStatus?,
+    isConfigServerControlled: Boolean,
     onControlButtonClick: () -> Unit,
+    onStopConfigServerInstance: () -> Unit,
     onExportConfig: (Uri) -> Unit,
     onImportConfig: (Uri) -> Unit
 ) {
@@ -178,6 +180,7 @@ fun ControlTab(
             }
         }
     )
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -191,7 +194,7 @@ fun ControlTab(
             instanceName = activeConfig.instanceName,
             virtualIp = status?.currentIpv4 ?: activeConfig.virtualIpv4,
             controlEnabled = activeConfig.instanceName.isNotBlank(),
-            onControlButtonClick = onControlButtonClick
+            onControlButtonClick = if (isConfigServerControlled) onStopConfigServerInstance else onControlButtonClick
         ) {
             Box {
                 IconButton(onClick = { showMenu = true }, enabled = !isRunning) {
@@ -743,6 +746,49 @@ fun ControlTab(
             )
         }
     }
+
+    // 配置服务器控制时的蒙版（不添加 clickable，事件穿透到下层）
+    if (isConfigServerControlled) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                modifier = Modifier.padding(32.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        Icons.Default.CloudSync,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "当前由配置服务器控制",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "配置不可编辑。点击顶部的停止按钮可停止远程实例。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+    } // Box
 }
 
 /**

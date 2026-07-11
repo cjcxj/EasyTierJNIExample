@@ -13,6 +13,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,8 +28,11 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.easytier.app.ConfigData
 import com.easytier.app.Screen
+import com.easytier.jni.ConfigServerClientManager
+import com.easytier.jni.DataPlaneClient
 import com.easytier.jni.DetailedNetworkInfo
 import com.easytier.jni.EasyTierManager
+import com.easytier.jni.RpcClient
 import kotlinx.coroutines.launch
 
 data class TabItem(val title: String, val icon: ImageVector)
@@ -43,19 +49,31 @@ fun MainScreen(
     onDeleteConfig: (ConfigData) -> Unit,
     status: EasyTierManager.EasyTierStatus?,
     isRunning: Boolean,
+    isConfigServerControlled: Boolean,
     onControlButtonClick: () -> Unit,
+    onStopConfigServerInstance: () -> Unit,
     detailedInfo: DetailedNetworkInfo?,
     rawEventHistory: List<String>,
     onRefreshDetailedInfo: () -> Unit,
     onCopyJsonClick: () -> Unit,
     onExportLogsClicked: () -> Unit,
     onExportConfig: (Uri) -> Unit,
-    onImportConfig: (Uri) -> Unit
+    onImportConfig: (Uri) -> Unit,
+    dataPlaneClient: DataPlaneClient?,
+    configServerManager: ConfigServerClientManager?,
+    machineId: String,
+    rpcClient: RpcClient?,
+    runningInstanceName: String,
+    configServerSettings: MainViewModel.ConfigServerSettings,
+    onSaveConfigServerSettings: (String, String, Boolean, Boolean) -> Unit
 ) {
     val tabs = listOf(
         TabItem("控制", Icons.Default.Settings),
         TabItem("状态", Icons.Default.ShowChart),
-        TabItem("日志", Icons.Default.List)
+        TabItem("日志", Icons.Default.List),
+        TabItem("调试", Icons.Default.NetworkCheck),
+        TabItem("配置中心", Icons.Default.CloudSync),
+        TabItem("RPC", Icons.Default.Terminal)
     )
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val coroutineScope = rememberCoroutineScope()
@@ -162,7 +180,9 @@ fun MainScreen(
                     onConfigChange = onConfigChange,
                     isRunning = isRunning,
                     status = status,
+                    isConfigServerControlled = isConfigServerControlled,
                     onControlButtonClick = onControlButtonClick,
+                    onStopConfigServerInstance = onStopConfigServerInstance,
                     onExportConfig = onExportConfig,
                     onImportConfig = onImportConfig
                 )
@@ -183,6 +203,26 @@ fun MainScreen(
                 2 -> LogTab(
                     rawEvents = rawEventHistory,
                     onExportClicked = onExportLogsClicked
+                )
+
+                3 -> DataPlaneDebugTab(
+                    dataPlaneClient = dataPlaneClient,
+                    isRunning = isRunning
+                )
+
+                4 -> ConfigServerTab(
+                    manager = configServerManager,
+                    machineId = machineId,
+                    initialUrl = configServerSettings.url,
+                    initialHostname = configServerSettings.hostname,
+                    initialSecureMode = configServerSettings.secureMode,
+                    initialAutoConnect = configServerSettings.autoConnect,
+                    onSettingsSaved = onSaveConfigServerSettings
+                )
+
+                5 -> RpcDebugTab(
+                    rpcClient = rpcClient,
+                    instanceName = runningInstanceName
                 )
             }
         }

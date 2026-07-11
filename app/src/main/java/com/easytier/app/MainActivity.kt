@@ -2,6 +2,7 @@ package com.easytier.app
 
 import android.app.Activity
 import android.app.Application
+import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.net.VpnService
@@ -50,6 +51,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
+        const val ACTION_STOP_VPN = "com.easytier.app.action.STOP_VPN"
     }
 
     private val viewModel: MainViewModel by viewModels {
@@ -120,7 +122,12 @@ class MainActivity : ComponentActivity() {
                 val status by viewModel.statusState
                 val detailedInfo by viewModel.detailedInfoState
                 val fullRawEventHistory by viewModel.fullRawEventHistory
+                val dataPlaneClient by viewModel.dataPlaneClient
+                val configServerManager by viewModel.configServerManager
+                val machineId by viewModel.machineId
+                val rpcClient by viewModel.rpcClient
                 val isRunning = viewModel.isRunning
+                val configServerSettings by viewModel.configServerSettings
 
                 NavHost(navController = navController, startDestination = Screen.Main.route) {
                     composable(Screen.Main.route) {
@@ -134,16 +141,27 @@ class MainActivity : ComponentActivity() {
                             onDeleteConfig = viewModel::deleteConfig,
                             status = status,
                             isRunning = isRunning,
+                            isConfigServerControlled = viewModel.isConfigServerControlled,
                             onControlButtonClick = {
                                 viewModel.handleControlButtonClick(this@MainActivity)
                             },
+                            onStopConfigServerInstance = { viewModel.stopConfigServerInstance() },
                             detailedInfo = detailedInfo,
                             rawEventHistory = fullRawEventHistory,
                             onRefreshDetailedInfo = { viewModel.manualRefreshDetailedInfo() },
                             onCopyJsonClick = viewModel::copyJsonToClipboard,
                             onExportLogsClicked = ::launchCreateLogFile,
                             onExportConfig = { uri -> viewModel.exportConfig(uri) },
-                            onImportConfig = { uri -> viewModel.importConfig(uri) }
+                            onImportConfig = { uri -> viewModel.importConfig(uri) },
+                            dataPlaneClient = dataPlaneClient,
+                            configServerManager = configServerManager,
+                            machineId = machineId,
+                            rpcClient = rpcClient,
+                            runningInstanceName = viewModel.runningInstanceName,
+                            configServerSettings = configServerSettings,
+                            onSaveConfigServerSettings = { url, hostname, secureMode, autoConnect ->
+                                viewModel.saveConfigServerSettings(url, hostname, secureMode, autoConnect)
+                            }
                         )
                     }
 
@@ -166,9 +184,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == ACTION_STOP_VPN) {
+            Log.i(TAG, "收到通知停止请求，停止服务")
+            viewModel.stopEasyTier()
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        viewModel.stopEasyTier()
+        if (isFinishing) {
+            viewModel.stopEasyTier()
+        }
     }
 
     fun requestVpnPermission() {

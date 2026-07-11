@@ -96,6 +96,13 @@ object EasyTierJNI {
      * 不支持 api.manage.WebClientService；实例启动、保留、删除、信息收集请继续使用专用 JNI API。
      * payloadJson 需要包含目标 RPC 所需的 instance selector。
      *
+     * serviceName 必须以 "Service" 结尾，与上游 FFI call_json_rpc 的 match 分支一致：
+     *   api.instance.PeerManageRpcService / ConnectorManageRpcService / VpnPortalRpcService
+     *   / TcpProxyRpcService / AclManageRpcService / PortForwardManageRpcService
+     *   / StatsRpcService / MappedListenerManageRpcService / CredentialManageRpcService
+     *   / PeerCenterManageRpcService
+     *   api.logger.LoggerRpcService / api.config.ConfigRpcService
+     *
      * @param serviceName RPC 服务名，例如 api.instance.PeerManageRpcService
      * @param methodName RPC 方法名，支持 snake_case 或 proto 方法名
      * @param domainName 仅 TcpProxyRpcService 使用；传 null 或空字符串默认 tcp

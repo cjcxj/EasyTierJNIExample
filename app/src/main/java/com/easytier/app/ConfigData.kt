@@ -92,6 +92,10 @@ data class ConfigData(
     val socketMark: String = "",
     val credentialFile: String = "",
 
+    // --- Android 端独有配置（不进 TomlConfig，仅持久化到 DataStore）---
+    // VPN 接口的 DNS 服务器，多行字符串每行一个 IP；为空时使用系统 DNS，再回退到默认
+    val vpnDnsServers: String = "",
+
     // --- 非 UI 字段 (仅用于 TOML 配置文件读写保留, 对齐上游) ---
     val netns: String = "",
     val acl: Acl? = null,

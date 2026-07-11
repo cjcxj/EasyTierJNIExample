@@ -2,13 +2,19 @@ package com.easytier.jni
 
 import android.app.Activity
 import android.content.Intent
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import com.squareup.moshi.Moshi
 import com.squareup.wire.WireJsonAdapterFactory
 import common.Ipv4Inet
 import api.manage.NetworkInstanceRunningInfoMap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 fun parseIpv4InetToString(inet: Ipv4Inet?): String? {
     val addr = inet?.address?.addr ?: return null
@@ -31,14 +37,19 @@ fun parseIpv4InetToString(inet: Ipv4Inet?): String? {
 class EasyTierManager(
     private val activity: Activity,
     private val instanceName: String,
-    private val networkConfig: String
+    private val networkConfig: String,
+    // Android 端独有配置：VPN 接口 DNS（多行字符串）与节点配置的 IPv6 地址
+    private val vpnDnsServers: String = "",
+    private val ipv6Config: String = ""
 ) {
     companion object {
         private const val TAG = "EasyTierManager"
         private const val MONITOR_INTERVAL = 3000L // 3秒监控间隔
     }
 
-    private val handler = Handler(Looper.getMainLooper())
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var monitorJob: Job? = null
+    @Volatile
     private var isRunning = false
     private var currentIpv4: String? = null
     private var currentProxyCidrs: List<String> = emptyList()
@@ -48,17 +59,6 @@ class EasyTierManager(
     private val moshi = Moshi.Builder().add(WireJsonAdapterFactory()).build()
     private val adapter = moshi.adapter(NetworkInstanceRunningInfoMap::class.java)
 
-    // 监控任务
-    private val monitorRunnable =
-        object : Runnable {
-            override fun run() {
-                if (isRunning) {
-                    monitorNetworkStatus()
-                    handler.postDelayed(this, MONITOR_INTERVAL)
-                }
-            }
-        }
-
     /** 启动 EasyTier 实例和监控 */
     fun start() {
         if (isRunning) {
@@ -67,14 +67,19 @@ class EasyTierManager(
         }
 
         try {
-            // 启动 EasyTier 实例
+            // 启动 EasyTier 实例（JNI 调用，快速返回）
             val result = EasyTierJNI.runNetworkInstance(networkConfig)
             if (result == 0) {
                 isRunning = true
                 Log.i(TAG, "EasyTier 实例启动成功: $instanceName")
 
-                // 开始监控网络状态
-                handler.post(monitorRunnable)
+                // 启动协程监控网络状态
+                monitorJob = scope.launch {
+                    while (isActive) {
+                        monitorNetworkStatus()
+                        delay(MONITOR_INTERVAL)
+                    }
+                }
             } else {
                 Log.e(TAG, "EasyTier 实例启动失败: $result")
                 val error = EasyTierJNI.getLastError()
@@ -94,8 +99,9 @@ class EasyTierManager(
 
         isRunning = false
 
-        // 停止监控任务
-        handler.removeCallbacks(monitorRunnable)
+        // 取消监控协程
+        monitorJob?.cancel()
+        monitorJob = null
 
         try {
             // 停止 VpnService
@@ -113,20 +119,21 @@ class EasyTierManager(
         }
     }
 
-    /** 监控网络状态 */
-    private fun monitorNetworkStatus() {
+    /** 监控网络状态（suspend，JNI 调用切到 IO 线程避免阻塞主线程） */
+    private suspend fun monitorNetworkStatus() {
         try {
-            val infosJson = EasyTierJNI.collectNetworkInfos(10)
-            if (infosJson.isNullOrEmpty()) {
-                Log.d(TAG, "未获取到网络信息")
-                return
+            // JNI 调用与 JSON 解析放到 IO 线程
+            val networkInfo = withContext(Dispatchers.IO) {
+                val infosJson = EasyTierJNI.collectNetworkInfos(10)
+                if (infosJson.isNullOrEmpty()) {
+                    return@withContext null
+                }
+                val networkInfoMap = parseNetworkInfo(infosJson)
+                networkInfoMap?.map?.get(instanceName)
             }
 
-            val networkInfoMap = parseNetworkInfo(infosJson)
-            val networkInfo = networkInfoMap?.map?.get(instanceName)
-
             if (networkInfo == null) {
-                Log.d(TAG, "未找到实例 $instanceName 的网络信息")
+                Log.d(TAG, "未获取到实例 $instanceName 的网络信息")
                 return
             }
 
@@ -167,7 +174,7 @@ class EasyTierManager(
                 currentIpv4 = newIpv4
                 currentProxyCidrs = newProxyCidrs.toList()
 
-                // 重启 VpnService
+                // 重启 VpnService（在主线程，因 startService 必须主线程）
                 if (newIpv4 != null) {
                     restartVpnService(newIpv4, newProxyCidrs)
                 }
@@ -205,15 +212,22 @@ class EasyTierManager(
     /** 启动 VpnService */
     private fun startVpnService(ipv4: String, proxyCidrs: List<String>) {
         try {
-            val intent = Intent(activity, EasyTierVpnService::class.java)
-            intent.putExtra("ipv4_address", ipv4)
-            intent.putStringArrayListExtra("proxy_cidrs", ArrayList(proxyCidrs))
-            intent.putExtra("instance_name", instanceName)
-
+            val dnsList = vpnDnsServers.lines().map { it.trim() }.filter { it.isNotBlank() }
+            val intent = Intent(activity, EasyTierVpnService::class.java).apply {
+                putExtra(EasyTierVpnService.EXTRA_IPV4_ADDRESS, ipv4)
+                putStringArrayListExtra(EasyTierVpnService.EXTRA_PROXY_CIDRS, ArrayList(proxyCidrs))
+                putExtra(EasyTierVpnService.EXTRA_INSTANCE_NAME, instanceName)
+                if (ipv6Config.isNotBlank()) {
+                    putExtra(EasyTierVpnService.EXTRA_IPV6_ADDRESS, ipv6Config)
+                }
+                if (dnsList.isNotEmpty()) {
+                    putStringArrayListExtra(EasyTierVpnService.EXTRA_DNS_SERVERS, ArrayList(dnsList))
+                }
+            }
             activity.startService(intent)
             vpnServiceIntent = intent
 
-            Log.i(TAG, "VpnService 已启动 - IPv4: $ipv4, Proxy CIDRs: $proxyCidrs")
+            Log.i(TAG, "VpnService 已启动 - IPv4: $ipv4, IPv6: ${if (ipv6Config.isNotBlank()) ipv6Config else "无"}, DNS(显式): ${dnsList.size} 个, Proxy CIDRs: ${proxyCidrs.size}")
         } catch (e: Exception) {
             Log.e(TAG, "启动 VpnService 时发生异常", e)
         }

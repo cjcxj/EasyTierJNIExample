@@ -310,14 +310,87 @@ object NetworkInfoParser {
                 }
 
                 "ListenerAdded" -> "开始监听: ${eventObject.optString("ListenerAdded", "")}" to EventInfo.Level.INFO
+                "ListenerAddFailed" -> {
+                    val arr = eventObject.optJSONArray("ListenerAddFailed")
+                    val url = arr?.optString(0, "") ?: ""
+                    val err = arr?.optString(1, "") ?: ""
+                    "监听器添加失败: $url ($err)" to EventInfo.Level.ERROR
+                }
+                "ListenerAcceptFailed" -> {
+                    val arr = eventObject.optJSONArray("ListenerAcceptFailed")
+                    val url = arr?.optString(0, "") ?: ""
+                    val err = arr?.optString(1, "") ?: ""
+                    "监听器接受连接失败: $url ($err)" to EventInfo.Level.ERROR
+                }
+                "ListenerPortMappingEstablished" -> {
+                    val obj = eventObject.optJSONObject("ListenerPortMappingEstablished")
+                    val local = obj?.optString("local_listener", "") ?: ""
+                    val mapped = obj?.optString("mapped_listener", "") ?: ""
+                    val backend = obj?.optString("backend", "") ?: ""
+                    "端口映射已建立: $local -> $mapped ($backend)" to EventInfo.Level.SUCCESS
+                }
                 "Connecting" -> "正在连接: ${eventObject.optString("Connecting", "")}" to EventInfo.Level.INFO
+                "ConnectError" -> {
+                    val arr = eventObject.optJSONArray("ConnectError")
+                    val dst = arr?.optString(0, "") ?: ""
+                    val ipVer = arr?.optString(1, "") ?: ""
+                    val err = arr?.optString(2, "") ?: ""
+                    "连接错误: $dst ($ipVer): $err" to EventInfo.Level.ERROR
+                }
                 "TunDeviceReady" -> "虚拟网卡已就绪" to EventInfo.Level.SUCCESS
+                "TunDeviceError" -> "TUN 设备错误: ${eventObject.optString("TunDeviceError", "")}" to EventInfo.Level.ERROR
                 "DhcpIpv4Changed" -> {
                     val arr = eventObject.optJSONArray("DhcpIpv4Changed")
                     val oldIp = arr?.optString(0, "无") ?: "无"
                     val newIp = arr?.optString(1, "N/A") ?: "N/A"
                     "DHCP IP 变更: $oldIp -> $newIp" to EventInfo.Level.INFO
                 }
+                "DhcpIpv4Conflicted" -> {
+                    val s = eventObject.optString("DhcpIpv4Conflicted", "")
+                    "DHCP IP 冲突: $s" to EventInfo.Level.WARNING
+                }
+                "PublicIpv6Changed" -> {
+                    val arr = eventObject.optJSONArray("PublicIpv6Changed")
+                    val oldIp = arr?.optString(0, "无") ?: "无"
+                    val newIp = arr?.optString(1, "N/A") ?: "N/A"
+                    "公网 IPv6 变更: $oldIp -> $newIp" to EventInfo.Level.INFO
+                }
+                "PublicIpv6RoutesUpdated" -> {
+                    val obj2 = eventObject.optJSONObject("PublicIpv6RoutesUpdated")
+                    val added = obj2?.optJSONArray("added")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+                    val removed = obj2?.optJSONArray("removed")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+                    "公网 IPv6 路由更新: +${added.size} -${removed.size}" to EventInfo.Level.INFO
+                }
+                "VpnPortalStarted" -> "VPN 门户已启动: ${eventObject.optString("VpnPortalStarted", "")}" to EventInfo.Level.SUCCESS
+                "VpnPortalClientConnected" -> {
+                    val arr = eventObject.optJSONArray("VpnPortalClientConnected")
+                    val clientIp = arr?.optString(1, "") ?: ""
+                    "VPN 门户客户端已连接: $clientIp" to EventInfo.Level.INFO
+                }
+                "VpnPortalClientDisconnected" -> {
+                    val arr = eventObject.optJSONArray("VpnPortalClientDisconnected")
+                    val clientIp = arr?.optString(1, "") ?: ""
+                    "VPN 门户客户端已断开: $clientIp" to EventInfo.Level.INFO
+                }
+                "PortForwardAdded" -> "端口转发已添加" to EventInfo.Level.INFO
+                "ConfigPatched" -> "配置已更新" to EventInfo.Level.INFO
+                "ProxyCidrsUpdated" -> {
+                    val obj2 = eventObject.optJSONObject("ProxyCidrsUpdated")
+                    val added = obj2?.optJSONArray("added")?.length() ?: 0
+                    val removed = obj2?.optJSONArray("removed")?.length() ?: 0
+                    "代理 CIDR 更新: +$added -$removed" to EventInfo.Level.INFO
+                }
+                "UdpBroadcastRelayStartResult" -> {
+                    val obj2 = eventObject.optJSONObject("UdpBroadcastRelayStartResult")
+                    val backend = obj2?.optString("capture_backend", "未知") ?: "未知"
+                    val err = obj2?.optString("error", null)
+                    if (err.isNullOrEmpty()) {
+                        "UDP 广播转发已启动: $backend" to EventInfo.Level.SUCCESS
+                    } else {
+                        "UDP 广播转发启动失败: $backend ($err)" to EventInfo.Level.ERROR
+                    }
+                }
+                "CredentialChanged" -> "凭证已变更" to EventInfo.Level.INFO
 
                 else -> {
                     val content = eventObject.opt(eventType)?.toString() ?: ""

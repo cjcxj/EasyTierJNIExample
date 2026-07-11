@@ -25,6 +25,7 @@ import com.easytier.app.SettingsRepository
 import com.easytier.app.TomlConfig
 import com.easytier.app.toConfigData
 import com.easytier.app.toTomlConfig
+import com.easytier.jni.ConfigServerClientManager
 import com.easytier.jni.DetailedNetworkInfo
 import com.easytier.jni.EasyTierJNI
 import com.easytier.jni.EasyTierManager
@@ -46,6 +47,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val settingsRepository = SettingsRepository(application)
     private var easyTierManager: EasyTierManager? = null
+    private val _dataPlaneClient = mutableStateOf<com.easytier.jni.DataPlaneClient?>(null)
+    val dataPlaneClient: State<com.easytier.jni.DataPlaneClient?> = _dataPlaneClient
+
+    private val _configServerManager = mutableStateOf<ConfigServerClientManager?>(null)
+    val configServerManager: State<ConfigServerClientManager?> = _configServerManager
+
+    private val _machineId = mutableStateOf("")
+    val machineId: State<String> = _machineId
+
+    private val _rpcClient = mutableStateOf<com.easytier.jni.RpcClient?>(null)
+    val rpcClient: State<com.easytier.jni.RpcClient?> = _rpcClient
+
+    // 配置服务器推送启动的实例名（非 null 表示有配置服务器启动的实例在运行）
+    private val _configServerInstanceName = mutableStateOf<String?>(null)
+
+    // 配置服务器持久化设置
+    data class ConfigServerSettings(
+        val url: String = "https://config.easytier.cn",
+        val hostname: String = "",
+        val secureMode: Boolean = false,
+        val autoConnect: Boolean = false
+    )
+
+    private val _configServerSettings = mutableStateOf(ConfigServerSettings())
+    val configServerSettings: State<ConfigServerSettings> = _configServerSettings
+
+    /** 是否由配置服务器控制（配置服务器启动了实例且无本地实例） */
+    val isConfigServerControlled: Boolean
+        get() = _configServerInstanceName.value != null && easyTierManager == null
 
     // --- 状态变量 ---
     private val _toastEvents = MutableSharedFlow<String>()
@@ -72,20 +102,127 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isRunning: Boolean
         get() = _statusState.value?.isRunning == true
 
+    /** 当前活跃的实例名：手动启动的优先，否则用配置服务器推送的 */
+    private val currentTrackingInstanceName: String?
+        get() = when {
+            easyTierManager != null && isRunning -> _activeConfig.value.instanceName
+            _configServerInstanceName.value != null -> _configServerInstanceName.value
+            else -> null
+        }
+
+    /** 供 UI 使用的当前运行实例名（RPC Tab 等） */
+    val runningInstanceName: String
+        get() = currentTrackingInstanceName ?: _activeConfig.value.instanceName
+
     init {
         viewModelScope.launch {
             loadAllConfigs()
         }
         viewModelScope.launch {
+            _machineId.value = settingsRepository.getMachineId()
+            val mgr = ConfigServerClientManager()
+            _configServerManager.value = mgr
+            _rpcClient.value = com.easytier.jni.RpcClient()
+
+            // 加载持久化的配置服务器设置
+            val savedUrl = settingsRepository.getConfigServerUrl()
+            val savedHostname = settingsRepository.getConfigServerHostname()
+            val savedSecureMode = settingsRepository.getConfigServerSecureMode()
+            val savedAutoConnect = settingsRepository.getAutoConnectConfigServer()
+            _configServerSettings.value = ConfigServerSettings(
+                url = savedUrl ?: "https://config.easytier.cn",
+                hostname = savedHostname ?: "",
+                secureMode = savedSecureMode,
+                autoConnect = savedAutoConnect
+            )
+
+            // 自动连接配置服务器
+            if (savedAutoConnect && !_configServerSettings.value.url.isBlank()) {
+                Log.i(TAG, "自动连接配置服务器: ${_configServerSettings.value.url}")
+                mgr.start(
+                    url = _configServerSettings.value.url,
+                    hostname = _configServerSettings.value.hostname.ifBlank { null },
+                    machineId = _machineId.value,
+                    secureMode = _configServerSettings.value.secureMode
+                )
+            }
+
+            // 监听配置服务器事件，跟踪实例生命周期
+            mgr.events.collect { json ->
+                try {
+                    val obj = JSONObject(json)
+                    val event = obj.optString("event", "")
+                    val instName = obj.optString("instance_name", "")
+                    val success = obj.optBoolean("success", true)
+                    if (instName.isEmpty()) return@collect
+
+                    when (event) {
+                        "run_network_instance" -> {
+                            if (success) {
+                                _configServerInstanceName.value = instName
+                                if (!isRunning) {
+                                    _dataPlaneClient.value = com.easytier.jni.DataPlaneClient(instName)
+                                }
+                                _toastEvents.emit("配置服务器启动了实例: $instName")
+                            }
+                        }
+                        "delete_network_instance" -> {
+                            if (_configServerInstanceName.value == instName) {
+                                _configServerInstanceName.value = null
+                                if (easyTierManager == null) {
+                                    _dataPlaneClient.value = null
+                                    _statusState.value = null
+                                    _detailedInfoState.value = null
+                                }
+                                _toastEvents.emit("配置服务器删除了实例: $instName")
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "解析配置服务器事件失败", e)
+                }
+            }
+        }
+        viewModelScope.launch {
             while (true) {
-                _statusState.value = easyTierManager?.getStatus()
-                if (isRunning) {
-                    // 在循环中，同时刷新快照和收集新日志
-                    refreshDetailedInfoSnapshot(false)
-                    collectNewEvents()
+                val manualStatus = easyTierManager?.getStatus()
+                val csInstance = _configServerInstanceName.value
+
+                when {
+                    manualStatus != null && manualStatus.isRunning -> {
+                        _statusState.value = manualStatus
+                        refreshDetailedInfoSnapshot(false, manualStatus.instanceName)
+                        collectNewEvents(manualStatus.instanceName)
+                    }
+                    csInstance != null -> {
+                        // 配置服务器启动的实例
+                        _statusState.value = EasyTierManager.EasyTierStatus(
+                            isRunning = true,
+                            instanceName = csInstance,
+                            currentIpv4 = null,
+                            currentProxyCidrs = emptyList()
+                        )
+                        refreshDetailedInfoSnapshot(false, csInstance)
+                        collectNewEvents(csInstance)
+                    }
+                    else -> {
+                        if (_statusState.value != null) _statusState.value = null
+                    }
                 }
                 delay(2000)
             }
+        }
+    }
+
+    // --- 配置服务器设置 ---
+
+    fun saveConfigServerSettings(url: String, hostname: String, secureMode: Boolean, autoConnect: Boolean) {
+        _configServerSettings.value = ConfigServerSettings(url, hostname, secureMode, autoConnect)
+        viewModelScope.launch {
+            settingsRepository.setConfigServerUrl(url)
+            settingsRepository.setConfigServerHostname(hostname)
+            settingsRepository.setConfigServerSecureMode(secureMode)
+            settingsRepository.setAutoConnectConfigServer(autoConnect)
         }
     }
 
@@ -301,22 +438,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         easyTierManager = EasyTierManager(
             activity = activity,
             instanceName = _activeConfig.value.instanceName,
-            networkConfig = configToml
+            networkConfig = configToml,
+            vpnDnsServers = _activeConfig.value.vpnDnsServers,
+            ipv6Config = _activeConfig.value.ipv6
         )
         easyTierManager?.start()
+        _dataPlaneClient.value = com.easytier.jni.DataPlaneClient(_activeConfig.value.instanceName)
     }
 
     fun stopEasyTier() {
         easyTierManager?.stop()
         easyTierManager = null
+
+        // 同时停止配置服务器启动的实例
+        if (_configServerInstanceName.value != null) {
+            EasyTierJNI.stopAllInstances()
+            _configServerInstanceName.value = null
+        }
+
         _statusState.value = null
         _detailedInfoState.value = null
-        _fullEventHistory.value = emptyList() // 清空UI用的日志
-        _fullRawEventHistory.value = emptyList() //清空原始日志历史
+        _fullEventHistory.value = emptyList()
+        _fullRawEventHistory.value = emptyList()
+        _dataPlaneClient.value = null
+    }
+
+    /** 仅停止配置服务器启动的实例（不影响本地启动的实例） */
+    fun stopConfigServerInstance() {
+        if (_configServerInstanceName.value == null) return
+        EasyTierJNI.stopAllInstances()
+        _configServerInstanceName.value = null
+        if (easyTierManager == null) {
+            _statusState.value = null
+            _detailedInfoState.value = null
+            _dataPlaneClient.value = null
+        }
+        _fullEventHistory.value = emptyList()
+        _fullRawEventHistory.value = emptyList()
     }
 
     override fun onCleared() {
         super.onCleared()
+        _configServerInstanceName.value = null
+        _configServerManager.value?.stop()
         stopEasyTier()
     }
 
@@ -324,12 +488,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun manualRefreshDetailedInfo() {
         viewModelScope.launch {
-            refreshDetailedInfoSnapshot(true)
+            val instName = currentTrackingInstanceName
+            if (instName != null) {
+                refreshDetailedInfoSnapshot(true, instName)
+            }
         }
     }
 
-    private suspend fun refreshDetailedInfoSnapshot(showToast: Boolean) {
-        if (easyTierManager == null || !isRunning) {
+    private suspend fun refreshDetailedInfoSnapshot(showToast: Boolean, instanceName: String) {
+        if (!isRunning) {
             _detailedInfoState.value = null
             if (showToast) viewModelScope.launch { _toastEvents.emit("服务未运行") }
             return
@@ -338,7 +505,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val jsonString = EasyTierJNI.collectNetworkInfos(10)
                 if (jsonString != null) {
-                    NetworkInfoParser.parse(jsonString, _activeConfig.value.instanceName)
+                    NetworkInfoParser.parse(jsonString, instanceName)
                 } else null
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to parse detailed info snapshot", e)
@@ -352,7 +519,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun collectNewEvents() {
+    private suspend fun collectNewEvents(instanceName: String) {
         if (!isRunning) return
 
         val fullJsonString = getRawJsonForClipboard() ?: return
@@ -361,7 +528,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val snapshotRawEvents = withContext(Dispatchers.Default) {
             NetworkInfoParser.extractRawEventStrings(
                 fullJsonString,
-                _activeConfig.value.instanceName
+                instanceName
             )
         }
 
@@ -390,7 +557,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun getRawJsonForClipboard(): String? {
-        if (easyTierManager == null || !isRunning) return null
+        if (!isRunning) return null
         return withContext(Dispatchers.IO) {
             try {
                 EasyTierJNI.collectNetworkInfos(10)
