@@ -65,7 +65,8 @@ fun MainScreen(
     rpcClient: RpcClient?,
     runningInstanceName: String,
     configServerSettings: MainViewModel.ConfigServerSettings,
-    onSaveConfigServerSettings: (String, String, Boolean, Boolean) -> Unit
+    onSaveConfigServerSettings: (String, String, Boolean, Boolean) -> Unit,
+    onDisconnectConfigServer: () -> Unit
 ) {
     val tabs = listOf(
         TabItem("控制", Icons.Default.Settings),
@@ -217,7 +218,8 @@ fun MainScreen(
                     initialHostname = configServerSettings.hostname,
                     initialSecureMode = configServerSettings.secureMode,
                     initialAutoConnect = configServerSettings.autoConnect,
-                    onSettingsSaved = onSaveConfigServerSettings
+                    onSettingsSaved = onSaveConfigServerSettings,
+                    onDisconnect = onDisconnectConfigServer
                 )
 
                 5 -> RpcDebugTab(

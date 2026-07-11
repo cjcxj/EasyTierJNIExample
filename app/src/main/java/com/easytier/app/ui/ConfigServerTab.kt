@@ -43,7 +43,8 @@ fun ConfigServerTab(
     initialHostname: String,
     initialSecureMode: Boolean,
     initialAutoConnect: Boolean,
-    onSettingsSaved: (url: String, hostname: String, secureMode: Boolean, autoConnect: Boolean) -> Unit
+    onSettingsSaved: (url: String, hostname: String, secureMode: Boolean, autoConnect: Boolean) -> Unit,
+    onDisconnect: () -> Unit = {}
 ) {
     var url by remember(initialUrl) { mutableStateOf(initialUrl) }
     var hostname by remember(initialHostname) { mutableStateOf(initialHostname) }
@@ -191,7 +192,10 @@ fun ConfigServerTab(
                         Text("连接")
                     }
                     OutlinedButton(
-                        onClick = { manager?.stop() },
+                        onClick = {
+                            manager?.stop()
+                            onDisconnect()
+                        },
                         enabled = connectionState != ConfigServerClientManager.ConnectionState.DISCONNECTED,
                         modifier = Modifier.weight(1f)
                     ) {

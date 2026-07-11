@@ -1,6 +1,7 @@
 package com.easytier.app.ui
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,6 +30,7 @@ import com.easytier.jni.ConfigServerClientManager
 import com.easytier.jni.DetailedNetworkInfo
 import com.easytier.jni.EasyTierJNI
 import com.easytier.jni.EasyTierManager
+import com.easytier.jni.EasyTierVpnService
 import com.easytier.jni.EventInfo
 import com.easytier.jni.NetworkInfoParser
 import kotlinx.coroutines.Dispatchers
@@ -196,13 +198,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     csInstance != null -> {
                         // 配置服务器启动的实例
+                        refreshDetailedInfoSnapshot(false, csInstance)
+                        val info = _detailedInfoState.value
+                        val virtualIp = info?.myNode?.virtualIp
+                            ?.takeIf { it.isNotBlank() && it != "正在获取中..." }
                         _statusState.value = EasyTierManager.EasyTierStatus(
                             isRunning = true,
                             instanceName = csInstance,
-                            currentIpv4 = null,
+                            currentIpv4 = virtualIp,
                             currentProxyCidrs = emptyList()
                         )
-                        refreshDetailedInfoSnapshot(false, csInstance)
                         collectNewEvents(csInstance)
                     }
                     else -> {
@@ -456,6 +461,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _configServerInstanceName.value = null
         }
 
+        // 确保 VpnService 被停止（防止 Activity 重建后 easyTierManager 为 null 导致通知残留）
+        try {
+            getApplication<Application>().stopService(
+                Intent(getApplication(), EasyTierVpnService::class.java)
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "停止 VpnService 失败", e)
+        }
+
         _statusState.value = null
         _detailedInfoState.value = null
         _fullEventHistory.value = emptyList()
@@ -468,6 +482,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_configServerInstanceName.value == null) return
         EasyTierJNI.stopAllInstances()
         _configServerInstanceName.value = null
+
+        // 确保 VpnService 被停止
+        try {
+            getApplication<Application>().stopService(
+                Intent(getApplication(), EasyTierVpnService::class.java)
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "停止 VpnService 失败", e)
+        }
+
         if (easyTierManager == null) {
             _statusState.value = null
             _detailedInfoState.value = null

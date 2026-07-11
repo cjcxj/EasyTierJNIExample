@@ -161,7 +161,8 @@ class MainActivity : ComponentActivity() {
                             configServerSettings = configServerSettings,
                             onSaveConfigServerSettings = { url, hostname, secureMode, autoConnect ->
                                 viewModel.saveConfigServerSettings(url, hostname, secureMode, autoConnect)
-                            }
+                            },
+                            onDisconnectConfigServer = { viewModel.stopConfigServerInstance() }
                         )
                     }
 
