@@ -49,10 +49,14 @@ sealed class Screen(val route: String) {
 
 class MainActivity : ComponentActivity() {
 
+    private enum class VpnAction { NONE, LOCAL_START, CONFIG_SERVER_VPN }
+
     companion object {
         private const val TAG = "MainActivity"
         const val ACTION_STOP_VPN = "com.easytier.app.action.STOP_VPN"
     }
+
+    private var pendingVpnAction = VpnAction.NONE
 
     private val viewModel: MainViewModel by viewModels {
         MainViewModelFactory(application)
@@ -61,12 +65,16 @@ class MainActivity : ComponentActivity() {
     private val vpnPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
-                Log.i(TAG, "VPN permission granted.")
-                viewModel.startEasyTier(this)
+                Log.i(TAG, "VPN permission granted. action=$pendingVpnAction")
+                when (pendingVpnAction) {
+                    VpnAction.CONFIG_SERVER_VPN -> viewModel.startVpnForConfigServerInstance()
+                    else -> viewModel.startEasyTier(this)
+                }
             } else {
-                Log.w(TAG, "VPN permission denied.")
+                Log.w(TAG, "VPN permission denied. action=$pendingVpnAction")
                 Toast.makeText(this, "需要VPN权限才能启动服务。", Toast.LENGTH_SHORT).show()
             }
+            pendingVpnAction = VpnAction.NONE
         }
 
     private val createFileLauncher =
@@ -201,14 +209,38 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // 远程配置 VPN 待授权时，回到前台自动触发权限请求
+        if (viewModel.consumePendingVpnForConfigServer()) {
+            requestVpnPermissionForConfigServer()
+        }
+    }
+
     fun requestVpnPermission() {
+        pendingVpnAction = VpnAction.LOCAL_START
         val intent = VpnService.prepare(this)
         if (intent != null) {
-            Log.i(TAG, "Requesting VPN permission...")
+            Log.i(TAG, "Requesting VPN permission (local start)...")
             vpnPermissionLauncher.launch(intent)
         } else {
-            Log.i(TAG, "VPN permission already granted, starting service.")
+            Log.i(TAG, "VPN permission already granted, starting local service.")
+            pendingVpnAction = VpnAction.NONE
             viewModel.startEasyTier(this)
+        }
+    }
+
+    /** 远程配置场景请求 VPN 权限（授权后只启动 VPN，不启动本地 EasyTier 实例） */
+    fun requestVpnPermissionForConfigServer() {
+        pendingVpnAction = VpnAction.CONFIG_SERVER_VPN
+        val intent = VpnService.prepare(this)
+        if (intent != null) {
+            Log.i(TAG, "Requesting VPN permission (config server)...")
+            vpnPermissionLauncher.launch(intent)
+        } else {
+            Log.i(TAG, "VPN permission already granted, starting config server VPN.")
+            pendingVpnAction = VpnAction.NONE
+            viewModel.startVpnForConfigServerInstance()
         }
     }
 }

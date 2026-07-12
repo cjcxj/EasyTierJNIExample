@@ -64,6 +64,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // 配置服务器推送启动的实例名（非 null 表示有配置服务器启动的实例在运行）
     private val _configServerInstanceName = mutableStateOf<String?>(null)
 
+    // 远程配置场景的 VPN 控制器（监控实例网络状态并建立 VPN 接口）
+    private var configServerVpnController: com.easytier.jni.ConfigServerVpnController? = null
+
+    // 远程配置 VPN 待授权状态（权限不足时缓存，App 前台时触发请求）
+    private val _pendingVpnForConfigServer = mutableStateOf(false)
+    val pendingVpnForConfigServer: State<Boolean> = _pendingVpnForConfigServer
+
     // 配置服务器持久化设置
     data class ConfigServerSettings(
         val url: String = "https://config.easytier.cn",
@@ -165,18 +172,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 if (!isRunning) {
                                     _dataPlaneClient.value = com.easytier.jni.DataPlaneClient(instName)
                                 }
+                                // 本地实例未运行时，启动 VPN 控制器建立组网（本地运行时由其 manager 管 VPN）
+                                if (easyTierManager == null && configServerVpnController == null) {
+                                    configServerVpnController = com.easytier.jni.ConfigServerVpnController(
+                                        context = getApplication(),
+                                        instanceName = instName,
+                                        onVpnAuthRequired = { _pendingVpnForConfigServer.value = true }
+                                    ).also { it.start() }
+                                }
                                 _toastEvents.emit("配置服务器启动了实例: $instName")
                             }
                         }
                         "delete_network_instance" -> {
                             if (_configServerInstanceName.value == instName) {
-                                _configServerInstanceName.value = null
-                                if (easyTierManager == null) {
-                                    _dataPlaneClient.value = null
-                                    _statusState.value = null
-                                    _detailedInfoState.value = null
-                                }
                                 _toastEvents.emit("配置服务器删除了实例: $instName")
+                                stopConfigServerInstance()
                             }
                         }
                     }
@@ -455,20 +465,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         easyTierManager?.stop()
         easyTierManager = null
 
-        // 同时停止配置服务器启动的实例
-        if (_configServerInstanceName.value != null) {
-            EasyTierJNI.stopAllInstances()
-            _configServerInstanceName.value = null
-        }
+        // 停止远程配置 VPN 控制器
+        configServerVpnController?.stop()
+        configServerVpnController = null
+        _pendingVpnForConfigServer.value = false
 
-        // 确保 VpnService 被停止（防止 Activity 重建后 easyTierManager 为 null 导致通知残留）
-        try {
-            getApplication<Application>().stopService(
-                Intent(getApplication(), EasyTierVpnService::class.java)
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "停止 VpnService 失败", e)
-        }
+        // 无条件停止所有 Rust 层实例（Activity 重建后 easyTierManager 为 null 时也要停止）
+        EasyTierJNI.stopAllInstances()
+        _configServerInstanceName.value = null
+
+        // 停止 VpnService（发送 ACTION_STOP 让 Service 主动 stopForeground 移除通知）
+        stopVpnServiceProperly()
 
         _statusState.value = null
         _detailedInfoState.value = null
@@ -483,14 +490,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         EasyTierJNI.stopAllInstances()
         _configServerInstanceName.value = null
 
-        // 确保 VpnService 被停止
-        try {
-            getApplication<Application>().stopService(
-                Intent(getApplication(), EasyTierVpnService::class.java)
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "停止 VpnService 失败", e)
-        }
+        // 停止 VPN 控制器并清除待授权状态
+        configServerVpnController?.stop()
+        configServerVpnController = null
+        _pendingVpnForConfigServer.value = false
+
+        // 停止 VpnService（发送 ACTION_STOP 让 Service 主动 stopForeground 移除通知）
+        stopVpnServiceProperly()
 
         if (easyTierManager == null) {
             _statusState.value = null
@@ -499,6 +505,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _fullEventHistory.value = emptyList()
         _fullRawEventHistory.value = emptyList()
+    }
+
+    /** 权限授予后启动远程配置实例的 VPN（由 MainActivity 权限回调调用） */
+    fun startVpnForConfigServerInstance() {
+        val instName = _configServerInstanceName.value
+        if (instName == null) {
+            Log.w(TAG, "无远程配置实例，无需启动 VPN")
+            return
+        }
+        _pendingVpnForConfigServer.value = false
+        val existing = configServerVpnController
+        if (existing != null) {
+            existing.retryStartVpn()
+        } else {
+            // controller 不存在（可能 App 重启后丢失），重新创建
+            configServerVpnController = com.easytier.jni.ConfigServerVpnController(
+                context = getApplication(),
+                instanceName = instName,
+                onVpnAuthRequired = { _pendingVpnForConfigServer.value = true }
+            ).also { it.start() }
+        }
+    }
+
+    /** 消费待授权标志，返回是否需要请求 VPN 权限（由 MainActivity.onResume 调用） */
+    fun consumePendingVpnForConfigServer(): Boolean {
+        val pending = _pendingVpnForConfigServer.value
+        _pendingVpnForConfigServer.value = false
+        return pending && _configServerInstanceName.value != null
+    }
+
+    /**
+     * 停止 VpnService 并移除前台通知。
+     *
+     * 前台服务通知必须通过 Service 自身的 stopForeground 才能可靠移除，
+     * 仅调用 NotificationManager.cancel 或 stopService 会因 onDestroy 异步延迟导致通知残留。
+     * 因此优先发送 ACTION_STOP intent 让 Service 主动执行 stopForeground + stopSelf；
+     * 若 App 在后台受限无法 startService，回退到 stopService 触发 onDestroy。
+     */
+    private fun stopVpnServiceProperly() {
+        val context = getApplication<Application>()
+        val stopIntent = Intent(context, EasyTierVpnService::class.java).apply {
+            action = EasyTierVpnService.ACTION_STOP
+        }
+        try {
+            context.startService(stopIntent)
+        } catch (e: Exception) {
+            Log.w(TAG, "startService(ACTION_STOP) 失败，回退到 stopService", e)
+            try {
+                context.stopService(Intent(context, EasyTierVpnService::class.java))
+            } catch (e2: Exception) {
+                Log.w(TAG, "stopService 也失败", e2)
+            }
+        }
+        cancelVpnNotification()
+    }
+
+    private fun cancelVpnNotification() {
+        try {
+            val nm = getApplication<Application>()
+                .getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            nm.cancel(EasyTierVpnService.NOTIFICATION_ID)
+        } catch (e: Exception) {
+            Log.w(TAG, "取消通知失败", e)
+        }
     }
 
     override fun onCleared() {

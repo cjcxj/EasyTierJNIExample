@@ -24,9 +24,9 @@ class EasyTierVpnService : VpnService() {
 
     companion object {
         private const val TAG = "EasyTierVpnService"
-        private const val NOTIFICATION_ID = 1
+        const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "easytier_vpn_channel"
-        private const val ACTION_STOP = "com.easytier.jni.action.STOP_VPN"
+        const val ACTION_STOP = "com.easytier.jni.action.STOP_VPN"
 
         // DNS 回退：当用户未配置且系统 DNS 不可用时使用
         private val FALLBACK_DNS = listOf("223.5.5.5", "114.114.114.114")
@@ -249,7 +249,18 @@ class EasyTierVpnService : VpnService() {
         super.onDestroy()
         Log.d(TAG, "VPN Service destroyed")
         setupThread?.interrupt()
-        vpnInterface?.close()
-        vpnInterface = null
+        if (vpnInterface != null) {
+            vpnInterface?.close()
+            vpnInterface = null
+            instanceName?.let { EasyTierJNI.retainNetworkInstance(null) }
+        }
+        // 双重保险移除通知
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(NOTIFICATION_ID)
+        } catch (e: Exception) {
+            Log.w(TAG, "取消通知失败", e)
+        }
     }
 }
