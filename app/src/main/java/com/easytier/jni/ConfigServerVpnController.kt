@@ -115,6 +115,20 @@ class ConfigServerVpnController(
                 return
             }
 
+            // 配置服务器通过 dev_name == "no_tun" 控制是否需要 TUN（与上游 ohrs 判断一致）
+            // no_tun 模式下实例只参与控制面，不建立 Android VPN 接口
+            if (networkInfo.dev_name == "no_tun") {
+                if (currentIpv4 != null) {
+                    Log.i(TAG, "实例 dev_name=no_tun，配置服务器要求不建立 TUN，停止已有 VPN")
+                    stopVpnService()
+                    currentIpv4 = null
+                    currentProxyCidrs = emptyList()
+                } else {
+                    Log.d(TAG, "实例 dev_name=no_tun，不建立 TUN")
+                }
+                return
+            }
+
             val newIpv4Inet = networkInfo.my_node_info?.virtual_ipv4
             if (newIpv4Inet == null) {
                 Log.w(TAG, "实例 $instanceName 暂无 IPv4")
@@ -156,8 +170,11 @@ class ConfigServerVpnController(
         }
     }
 
+    /**
+     * 应用新的 IP/路由配置。不先 stopService：对已运行的 Service 再次 startService
+     * 会触发 onStartCommand 重建 TUN 接口并关闭旧接口，避免拆掉整个链路。
+     */
     private fun restartVpnService(ipv4: String, proxyCidrs: List<String>) {
-        stopVpnService()
         if (VpnService.prepare(context) != null) {
             Log.w(TAG, "VPN 权限未授予，缓存待启动状态")
             onVpnAuthRequired()

@@ -59,16 +59,22 @@ class EasyTierManager(
     private val moshi = Moshi.Builder().add(WireJsonAdapterFactory()).build()
     private val adapter = moshi.adapter(NetworkInstanceRunningInfoMap::class.java)
 
-    /** 启动 EasyTier 实例和监控 */
-    fun start() {
+    /**
+     * 启动 EasyTier 实例和监控（suspend：由调用方在协程中 await）。
+     * JNI 调用在 IO 线程执行，避免阻塞主线程；isRunning 在返回前已同步置位，
+     * 使后续 stop 判断状态一致。
+     */
+    suspend fun start() {
         if (isRunning) {
             Log.w(TAG, "EasyTier 实例已经在运行中")
             return
         }
 
         try {
-            // 启动 EasyTier 实例（JNI 调用，快速返回）
-            val result = EasyTierJNI.runNetworkInstance(networkConfig)
+            // 启动 EasyTier 实例（JNI 调用切到 IO 线程）
+            val result = withContext(Dispatchers.IO) {
+                EasyTierJNI.runNetworkInstance(networkConfig)
+            }
             if (result == 0) {
                 isRunning = true
                 Log.i(TAG, "EasyTier 实例启动成功: $instanceName")
@@ -82,7 +88,7 @@ class EasyTierManager(
                 }
             } else {
                 Log.e(TAG, "EasyTier 实例启动失败: $result")
-                val error = EasyTierJNI.getLastError()
+                val error = withContext(Dispatchers.IO) { EasyTierJNI.getLastError() }
                 Log.e(TAG, "错误信息: $error")
             }
         } catch (e: Exception) {
@@ -90,8 +96,12 @@ class EasyTierManager(
         }
     }
 
-    /** 停止 EasyTier 实例和监控 */
-    fun stop() {
+    /**
+     * 停止 EasyTier 监控与 VpnService（suspend：由调用方 await）。
+     * 注意：不再在此处调用 [EasyTierJNI.stopAllInstances]——实例的销毁由
+     * [MainViewModel] 作为单一协调者统一执行，避免旧实例的异步停止误杀后来新建的实例。
+     */
+    suspend fun stop() {
         if (!isRunning) {
             Log.w(TAG, "EasyTier 实例未在运行")
             return
@@ -104,11 +114,10 @@ class EasyTierManager(
         monitorJob = null
 
         try {
-            // 停止 VpnService
-            stopVpnService()
-
-            // 停止 EasyTier 实例
-            EasyTierJNI.stopAllInstances()
+            // JNI 停止调用切到 IO 线程（stopService 允许在任意线程调用）
+            withContext(Dispatchers.IO) {
+                stopVpnService()
+            }
             Log.i(TAG, "EasyTier 实例已停止: $instanceName")
 
             // 重置状态
@@ -196,13 +205,15 @@ class EasyTierManager(
         }
     }
 
-    /** 重启 VpnService */
+    /**
+     * 重启 VpnService（应用新的 IP/路由配置）。
+     *
+     * 不先 stopService：对已运行的 Service 再次 startService 会重新触发 onStartCommand，
+     * Service 内部会建立新 TUN 接口并在就绪后关闭旧接口，实现无缝切换；
+     * 若先 stopService 会触发 Service.onDestroy，链路会被整体拆掉。
+     */
     private fun restartVpnService(ipv4: String, proxyCidrs: List<String>) {
         try {
-            // 先停止现有的 VpnService
-            stopVpnService()
-
-            // 启动新的 VpnService
             startVpnService(ipv4, proxyCidrs)
         } catch (e: Exception) {
             Log.e(TAG, "重启 VpnService 时发生异常", e)

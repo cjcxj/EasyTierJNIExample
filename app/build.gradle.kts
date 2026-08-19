@@ -1,4 +1,6 @@
 // app/build.gradle.kts
+import java.util.Properties
+import java.io.FileInputStream
 
 plugins {
     alias(libs.plugins.androidApplication)
@@ -27,11 +29,19 @@ android {
 
     signingConfigs {
         create("release") {
-            // 使用 project.findProperty 安全获取，如果找不到则返回空字符串或默认值
-            storePassword = project.findProperty("MY_KEYSTORE_PASSWORD")?.toString() ?: ""
-            keyPassword = project.findProperty("MY_KEY_PASSWORD")?.toString() ?: ""
-            keyAlias = project.findProperty("MY_KEY_ALIAS")?.toString() ?: ""
-            // storeFile = file("你的签名文件路径.jks")
+            // 手动加载 local.properties 文件
+            val localProperties = Properties()
+            val localPropertiesFile = rootProject.file("local.properties")
+            if (localPropertiesFile.exists()) {
+                localProperties.load(FileInputStream(localPropertiesFile))
+            }
+
+            // 从加载好的文件中读取密码
+            storePassword = localProperties.getProperty("MY_KEYSTORE_PASSWORD") ?: ""
+            keyAlias = localProperties.getProperty("MY_KEY_ALIAS") ?: ""
+            keyPassword = localProperties.getProperty("MY_KEY_PASSWORD") ?: ""
+
+            storeFile = file("keystore/EasyTierJNIExample.jks")
         }
     }
 
@@ -68,6 +78,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {

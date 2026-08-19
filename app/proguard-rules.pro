@@ -22,6 +22,13 @@
 # 显式保留 JNI 接口类，确保其 init 块和所有方法不被任何优化影响
 -keep class com.easytier.jni.EasyTierJNI { *; }
 
+# 保留配置服务器事件回调接口：JNI 层通过 call_method("onEvent","(Ljava/lang/String;)V")
+# 反射调用，R8 混淆会重命名方法名导致回调失败、事件丢失
+-keep class com.easytier.jni.ConfigServerEventCallback { *; }
+-keepclassmembers interface com.easytier.jni.ConfigServerEventCallback {
+    public void onEvent(java.lang.String);
+}
+
 
 # ===================================================================
 # 第三方库规则

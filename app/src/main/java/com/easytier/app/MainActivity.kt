@@ -1,11 +1,14 @@
 package com.easytier.app
 
+import android.Manifest
 import android.app.Activity
 import android.app.Application
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -21,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -54,6 +58,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "MainActivity"
         const val ACTION_STOP_VPN = "com.easytier.app.action.STOP_VPN"
+        private const val KEY_PENDING_VPN_ACTION = "pending_vpn_action"
     }
 
     private var pendingVpnAction = VpnAction.NONE
@@ -61,6 +66,12 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels {
         MainViewModelFactory(application)
     }
+
+    // Android 13+ 需运行时请求通知权限，否则前台服务通知不可见
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            Log.i(TAG, "POST_NOTIFICATIONS granted=$granted")
+        }
 
     private val vpnPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -103,6 +114,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 恢复旋转/重建前未完成的 VPN 授权动作，避免授权回调走错分支
+        pendingVpnAction = savedInstanceState?.getString(KEY_PENDING_VPN_ACTION)
+            ?.let { name -> runCatching { VpnAction.valueOf(name) }.getOrNull() }
+            ?: VpnAction.NONE
+        // Android 13+ 请求通知权限，确保前台服务"运行中"通知可见
+        requestNotificationPermissionIfNeeded()
+
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             val context = LocalContext.current
@@ -202,10 +220,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(KEY_PENDING_VPN_ACTION, pendingVpnAction.name)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        if (isFinishing) {
+        // 仅在 Activity 真正退出（而非旋转屏幕等配置变更导致的重建）时才停止服务。
+        // 部分 ROM 在配置变更重建时会误报 isFinishing=true，导致旋转屏幕后 VPN 被停掉。
+        if (isFinishing && !isChangingConfigurations) {
+            Log.i(TAG, "Activity 正在退出，停止 EasyTier 服务")
             viewModel.stopEasyTier()
+        } else if (isFinishing) {
+            Log.i(TAG, "配置变更导致的重建（isFinishing=true 但 isChangingConfigurations=true），不停止服务")
         }
     }
 
@@ -214,6 +242,15 @@ class MainActivity : ComponentActivity() {
         // 远程配置 VPN 待授权时，回到前台自动触发权限请求
         if (viewModel.consumePendingVpnForConfigServer()) {
             requestVpnPermissionForConfigServer()
+        }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 

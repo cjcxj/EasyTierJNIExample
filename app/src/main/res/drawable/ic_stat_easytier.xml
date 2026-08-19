@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 专用通知状态栏小图标（单色，白底透明，适配 Android 状态栏渲染） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 中心节点 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,9A2.2,2.2 0 1,0 12,13.4A2.2,2.2 0 1,0 12,9Z" />
+    <!-- 三条连接线（上/左下/右下） -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:pathData="M12,13.4 L12,17.4 M12,9 L12,5 M10.1,14.4 L6.6,17.4 M13.9,14.4 L17.4,17.4" />
+    <!-- 三端卫星节点 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,2.4A1.6,1.6 0 1,0 12,5.6A1.6,1.6 0 1,0 12,2.4Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M4.8,18.2A1.6,1.6 0 1,0 4.8,21.4A1.6,1.6 0 1,0 4.8,18.2Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M19.2,18.2A1.6,1.6 0 1,0 19.2,21.4A1.6,1.6 0 1,0 19.2,18.2Z" />
+</vector>

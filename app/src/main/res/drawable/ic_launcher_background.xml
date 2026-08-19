@@ -11,11 +11,11 @@
             <gradient
                 android:type="linear"
                 android:startX="0"
-                android:startY="0"
+                android:startY="54"
                 android:endX="108"
-                android:endY="108"
-                android:startColor="#FF0D47A1"
-                android:endColor="#FF1976D2" />
+                android:endY="54"
+                android:startColor="#FFB0DAB9"
+                android:endColor="#FFDAD299" />
         </aapt:attr>
     </path>
 </vector>

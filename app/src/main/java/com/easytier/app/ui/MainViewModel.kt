@@ -37,6 +37,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import org.json.JSONObject
@@ -48,6 +50,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private val settingsRepository = SettingsRepository(application)
+
+    /**
+     * 实例/VPN 生命周期协调锁：确保任何时刻只有一个「驱动者」在运行
+     * （本地 EasyTierManager 或配置服务器 ConfigServerVpnController 二选一），
+     * 并串行化 start/stop，避免旧实例的异步停止误杀新实例。
+     */
+    private val lifecycleMutex = Mutex()
+
     private var easyTierManager: EasyTierManager? = null
     private val _dataPlaneClient = mutableStateOf<com.easytier.jni.DataPlaneClient?>(null)
     val dataPlaneClient: State<com.easytier.jni.DataPlaneClient?> = _dataPlaneClient
@@ -168,17 +178,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     when (event) {
                         "run_network_instance" -> {
                             if (success) {
-                                _configServerInstanceName.value = instName
-                                if (!isRunning) {
-                                    _dataPlaneClient.value = com.easytier.jni.DataPlaneClient(instName)
-                                }
-                                // 本地实例未运行时，启动 VPN 控制器建立组网（本地运行时由其 manager 管 VPN）
-                                if (easyTierManager == null && configServerVpnController == null) {
-                                    configServerVpnController = com.easytier.jni.ConfigServerVpnController(
-                                        context = getApplication(),
-                                        instanceName = instName,
-                                        onVpnAuthRequired = { _pendingVpnForConfigServer.value = true }
-                                    ).also { it.start() }
+                                lifecycleMutex.withLock {
+                                    _configServerInstanceName.value = instName
+                                    if (!isRunning) {
+                                        _dataPlaneClient.value = com.easytier.jni.DataPlaneClient(instName)
+                                    }
+                                    // 收敛：仅在没有本地实例（单一驱动者）时才由配置服务器接管 VPN。
+                                    // 是否建立 TUN 由配置服务器下发的 dev_name 决定（no_tun 不建 Android VPN）。
+                                    if (easyTierManager == null && configServerVpnController == null) {
+                                        configServerVpnController = com.easytier.jni.ConfigServerVpnController(
+                                            context = getApplication(),
+                                            instanceName = instName,
+                                            onVpnAuthRequired = { _pendingVpnForConfigServer.value = true }
+                                        ).also { it.start() }
+                                    }
                                 }
                                 _toastEvents.emit("配置服务器启动了实例: $instName")
                             }
@@ -425,106 +438,138 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startEasyTier(activity: ComponentActivity) {
-        if (isRunning) {
-            Log.w(TAG, "EasyTier is already running.")
-            return
-        }
+        viewModelScope.launch {
+            lifecycleMutex.withLock {
+                if (isRunning) {
+                    Log.w(TAG, "EasyTier is already running.")
+                    return@withLock
+                }
 
-        val configToml = generateTomlConfig(_activeConfig.value)
-        Log.d(TAG, "Generated Config:\n$configToml")
+                // 收敛：本地启动前先释放配置服务器拥有的实例/VPN，确保单一驱动者
+                teardownConfigServerOwnership()
 
-        val timeStamp = java.time.OffsetDateTime.now().toString()
+                val configToml = generateTomlConfig(_activeConfig.value)
+                Log.d(TAG, "Generated Config:\n$configToml")
 
+                val timeStamp = java.time.OffsetDateTime.now().toString()
 
-        val tomlLogEntry = JSONObject()
-            .put("time", timeStamp)
-            .put(
-                "event",
-                JSONObject().put(
-                    "GeneratedTomlConfig",
-                    "\n--- 使用的TOML配置 ---\n$configToml\n-----------------------------"
+                val tomlLogEntry = JSONObject()
+                    .put("time", timeStamp)
+                    .put(
+                        "event",
+                        JSONObject().put(
+                            "GeneratedTomlConfig",
+                            "\n--- 使用的TOML配置 ---\n$configToml\n-----------------------------"
+                        )
+                    )
+                    .toString()
+
+                _fullRawEventHistory.value = listOf(tomlLogEntry)
+                _fullEventHistory.value = emptyList()
+
+                easyTierManager = EasyTierManager(
+                    activity = activity,
+                    instanceName = _activeConfig.value.instanceName,
+                    networkConfig = configToml,
+                    vpnDnsServers = _activeConfig.value.vpnDnsServers,
+                    ipv6Config = _activeConfig.value.ipv6
                 )
-            )
-            .toString()
-
-        _fullRawEventHistory.value = listOf(tomlLogEntry)
-        _fullEventHistory.value = emptyList()
-
-        easyTierManager = EasyTierManager(
-            activity = activity,
-            instanceName = _activeConfig.value.instanceName,
-            networkConfig = configToml,
-            vpnDnsServers = _activeConfig.value.vpnDnsServers,
-            ipv6Config = _activeConfig.value.ipv6
-        )
-        easyTierManager?.start()
-        _dataPlaneClient.value = com.easytier.jni.DataPlaneClient(_activeConfig.value.instanceName)
+                easyTierManager?.start()
+                _dataPlaneClient.value = com.easytier.jni.DataPlaneClient(_activeConfig.value.instanceName)
+            }
+        }
     }
 
     fun stopEasyTier() {
-        easyTierManager?.stop()
-        easyTierManager = null
+        Log.i(TAG, "stopEasyTier() 被调用，调用栈如下", Throwable("stopEasyTier caller trace"))
+        viewModelScope.launch {
+            lifecycleMutex.withLock {
+                easyTierManager?.stop()
+                easyTierManager = null
 
-        // 停止远程配置 VPN 控制器
-        configServerVpnController?.stop()
-        configServerVpnController = null
-        _pendingVpnForConfigServer.value = false
+                // 停止远程配置 VPN 控制器
+                configServerVpnController?.stop()
+                configServerVpnController = null
+                _pendingVpnForConfigServer.value = false
 
-        // 无条件停止所有 Rust 层实例（Activity 重建后 easyTierManager 为 null 时也要停止）
-        EasyTierJNI.stopAllInstances()
-        _configServerInstanceName.value = null
+                // 无条件停止所有 Rust 层实例（Activity 重建后 easyTierManager 为 null 时也要停止）
+                withContext(Dispatchers.IO) { EasyTierJNI.stopAllInstances() }
+                _configServerInstanceName.value = null
 
-        // 停止 VpnService（发送 ACTION_STOP 让 Service 主动 stopForeground 移除通知）
-        stopVpnServiceProperly()
+                // 停止 VpnService（发送 ACTION_STOP 让 Service 主动 stopForeground 移除通知）
+                stopVpnServiceProperly()
 
-        _statusState.value = null
-        _detailedInfoState.value = null
-        _fullEventHistory.value = emptyList()
-        _fullRawEventHistory.value = emptyList()
-        _dataPlaneClient.value = null
+                _statusState.value = null
+                _detailedInfoState.value = null
+                _fullEventHistory.value = emptyList()
+                _fullRawEventHistory.value = emptyList()
+                _dataPlaneClient.value = null
+            }
+        }
     }
 
-    /** 仅停止配置服务器启动的实例（不影响本地启动的实例） */
+    /**
+     * 仅停止配置服务器启动的实例（不影响本地启动的实例）。
+     * 在 lifecycleMutex 内串行化，避免与本地实例的启停交错。
+     */
     fun stopConfigServerInstance() {
         if (_configServerInstanceName.value == null) return
-        EasyTierJNI.stopAllInstances()
-        _configServerInstanceName.value = null
+        Log.i(TAG, "stopConfigServerInstance() 被调用，调用栈如下", Throwable("stopConfigServerInstance caller trace"))
+        viewModelScope.launch {
+            lifecycleMutex.withLock {
+                withContext(Dispatchers.IO) { EasyTierJNI.stopAllInstances() }
+                _configServerInstanceName.value = null
 
-        // 停止 VPN 控制器并清除待授权状态
+                // 停止 VPN 控制器并清除待授权状态
+                configServerVpnController?.stop()
+                configServerVpnController = null
+                _pendingVpnForConfigServer.value = false
+
+                // 停止 VpnService（发送 ACTION_STOP 让 Service 主动 stopForeground 移除通知）
+                stopVpnServiceProperly()
+
+                if (easyTierManager == null) {
+                    _statusState.value = null
+                    _detailedInfoState.value = null
+                    _dataPlaneClient.value = null
+                }
+                _fullEventHistory.value = emptyList()
+                _fullRawEventHistory.value = emptyList()
+            }
+        }
+    }
+
+    /** 释放配置服务器拥有的实例/VPN 所有权（须在 lifecycleMutex 内调用） */
+    private suspend fun teardownConfigServerOwnership() {
         configServerVpnController?.stop()
         configServerVpnController = null
         _pendingVpnForConfigServer.value = false
-
-        // 停止 VpnService（发送 ACTION_STOP 让 Service 主动 stopForeground 移除通知）
-        stopVpnServiceProperly()
-
-        if (easyTierManager == null) {
-            _statusState.value = null
-            _detailedInfoState.value = null
-            _dataPlaneClient.value = null
-        }
-        _fullEventHistory.value = emptyList()
-        _fullRawEventHistory.value = emptyList()
+        _configServerInstanceName.value = null
+        withContext(Dispatchers.IO) { EasyTierJNI.stopAllInstances() }
     }
 
     /** 权限授予后启动远程配置实例的 VPN（由 MainActivity 权限回调调用） */
     fun startVpnForConfigServerInstance() {
-        val instName = _configServerInstanceName.value
-        if (instName == null) {
-            Log.w(TAG, "无远程配置实例，无需启动 VPN")
-            return
-        }
-        _pendingVpnForConfigServer.value = false
-        val existing = configServerVpnController
-        if (existing != null) {
-            existing.retryStartVpn()
-        } else {
-            // controller 不存在（可能 App 重启后丢失），重新创建
-            configServerVpnController = com.easytier.jni.ConfigServerVpnController(
-                context = getApplication(),
-                instanceName = instName,
-                onVpnAuthRequired = { _pendingVpnForConfigServer.value = true }
-            ).also { it.start() }
+        viewModelScope.launch {
+            lifecycleMutex.withLock {
+                val instName = _configServerInstanceName.value
+                if (instName == null) {
+                    Log.w(TAG, "无远程配置实例，无需启动 VPN")
+                    return@withLock
+                }
+                _pendingVpnForConfigServer.value = false
+                val existing = configServerVpnController
+                if (existing != null) {
+                    existing.retryStartVpn()
+                } else {
+                    // controller 不存在（可能 App 重启后丢失），重新创建
+                    configServerVpnController = com.easytier.jni.ConfigServerVpnController(
+                        context = getApplication(),
+                        instanceName = instName,
+                        onVpnAuthRequired = { _pendingVpnForConfigServer.value = true }
+                    ).also { it.start() }
+                }
+            }
         }
     }
 

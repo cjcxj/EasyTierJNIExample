@@ -24,6 +24,9 @@ local.properties
 *.jks
 *.keystore
 
+# Signed/exported builds
+/app/release/
+
 # Google Services file (if downloaded manually)
 google-services.json
 

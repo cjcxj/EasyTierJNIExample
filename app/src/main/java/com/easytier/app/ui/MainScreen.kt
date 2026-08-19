@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.easytier.app.BuildConfig
 import com.easytier.app.ConfigData
 import com.easytier.app.Screen
 import com.easytier.jni.ConfigServerClientManager
@@ -35,7 +36,9 @@ import com.easytier.jni.EasyTierManager
 import com.easytier.jni.RpcClient
 import kotlinx.coroutines.launch
 
-data class TabItem(val title: String, val icon: ImageVector)
+data class TabItem(val title: String, val icon: ImageVector, val type: TabType)
+
+enum class TabType { CONTROL, STATUS, LOG, DEBUG, CONFIG_SERVER, RPC }
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -68,14 +71,18 @@ fun MainScreen(
     onSaveConfigServerSettings: (String, String, Boolean, Boolean) -> Unit,
     onDisconnectConfigServer: () -> Unit
 ) {
-    val tabs = listOf(
-        TabItem("控制", Icons.Default.Settings),
-        TabItem("状态", Icons.Default.ShowChart),
-        TabItem("日志", Icons.Default.List),
-        TabItem("调试", Icons.Default.NetworkCheck),
-        TabItem("配置中心", Icons.Default.CloudSync),
-        TabItem("RPC", Icons.Default.Terminal)
-    )
+    val tabs = buildList {
+        add(TabItem("控制", Icons.Default.Settings, TabType.CONTROL))
+        add(TabItem("状态", Icons.Default.ShowChart, TabType.STATUS))
+        add(TabItem("日志", Icons.Default.List, TabType.LOG))
+        if (BuildConfig.DEBUG) {
+            add(TabItem("调试", Icons.Default.NetworkCheck, TabType.DEBUG))
+        }
+        add(TabItem("配置中心", Icons.Default.CloudSync, TabType.CONFIG_SERVER))
+        if (BuildConfig.DEBUG) {
+            add(TabItem("RPC", Icons.Default.Terminal, TabType.RPC))
+        }
+    }
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val coroutineScope = rememberCoroutineScope()
 
@@ -122,7 +129,7 @@ fun MainScreen(
                         selected = pagerState.currentPage == index,
                         onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
                         icon = {
-                            if (index == 1) {
+                            if (tabItem.type == TabType.STATUS) {
                                 val peerCount = detailedInfo?.finalPeerList?.size ?: 0
                                 if (peerCount > 0) {
                                     BadgedBox(badge = { Badge { Text(peerCount.toString()) } }) {
@@ -171,8 +178,8 @@ fun MainScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) { page ->
-            when (page) {
-                0 -> ControlTab(
+            when (tabs[page].type) {
+                TabType.CONTROL -> ControlTab(
                     allConfigs = allConfigs,
                     activeConfig = activeConfig,
                     onActiveConfigChange = onActiveConfigChange,
@@ -188,7 +195,7 @@ fun MainScreen(
                     onImportConfig = onImportConfig
                 )
 
-                1 -> StatusTab(
+                TabType.STATUS -> StatusTab(
                     status = status, isRunning = isRunning, detailedInfo = detailedInfo,
                     onRefreshDetailedInfo = onRefreshDetailedInfo,
                     onPeerClick = { peer ->
@@ -201,17 +208,17 @@ fun MainScreen(
                     onCopyJsonClick = onCopyJsonClick
                 )
 
-                2 -> LogTab(
+                TabType.LOG -> LogTab(
                     rawEvents = rawEventHistory,
                     onExportClicked = onExportLogsClicked
                 )
 
-                3 -> DataPlaneDebugTab(
+                TabType.DEBUG -> DataPlaneDebugTab(
                     dataPlaneClient = dataPlaneClient,
                     isRunning = isRunning
                 )
 
-                4 -> ConfigServerTab(
+                TabType.CONFIG_SERVER -> ConfigServerTab(
                     manager = configServerManager,
                     machineId = machineId,
                     initialUrl = configServerSettings.url,
@@ -222,7 +229,7 @@ fun MainScreen(
                     onDisconnect = onDisconnectConfigServer
                 )
 
-                5 -> RpcDebugTab(
+                TabType.RPC -> RpcDebugTab(
                     rpcClient = rpcClient,
                     instanceName = runningInstanceName
                 )
